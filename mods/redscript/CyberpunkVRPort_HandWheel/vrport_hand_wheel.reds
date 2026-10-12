@@ -14,7 +14,7 @@ public func VRWheelSlotLabel(slot: Int32) -> String {
   if !ItemID.IsValid(item) { return ""; }
   let record = TweakDBInterface.GetItemRecord(ItemID.GetTDBID(item));
   if !IsDefined(record) { return ""; }
-  return GetLocalizedText(record.DisplayName());
+  return GetLocalizedTextByKey(record.DisplayName());
 }
 
 @addMethod(PlayerPuppet)
