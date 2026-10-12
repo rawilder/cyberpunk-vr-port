@@ -4,50 +4,127 @@ Phase 4 of the Steam Frame plan. Goal: make Cyberpunk 2077 play like a game buil
 (Half-Life: Alyx as the reference), on top of dariulone's port, without leaving the
 engine's reachable surface or losing the ability to rebase on upstream.
 
-Status: **draft for Adam's sign-off.** Each section ends with the decisions it needs.
+Status: **agreed order as of 2026-10-12.** Sections carry the decisions still open.
 
-## 1. Scope and constraints
+## 1. Order
+
+Adam's priority is quality of life, in this order:
+
+1. **Graphics** — eye-tracked foveation (done, tuning), then spend the headroom.
+2. **UI** — the hand-anchored weapon wheel first; menus later.
+3. **Grav gloves** — highlight and pull things to the hand.
+4. **True melee** — Melee v2, preceded by the one-day spike.
+5. The rest: reload for every weapon, two-hand holds, holsters retuned.
+
+**Deferred, not planned** until Adam has played enough to judge them: teleport locomotion,
+enemy tuning, driving tuning. The notes for those live in §9 so nothing is lost.
+
+## 2. Scope and constraints
 
 | | |
 |---|---|
 | Target | Adam's PC → Steam Frame, PC streaming. No other headsets. |
 | Assets | Game-shipped meshes, animations and props only (WolvenKit / ArchiveXL / TweakXL). |
-| Mergeability | New systems live in **new modules** that replace upstream ones by configuration. The C++ plugin (`CyberpunkVR_Stereo.dll`) is edited only where a system cannot be built in CET/redscript. |
-| Order | Melee → guns → locomotion → enemies → driving. Each is shippable on its own. |
+| Mergeability | New systems live in **new modules** that replace upstream ones by configuration. The C++ plugin is edited only where a system cannot be built in CET/redscript. Branch `frame` on the fork, rebased on upstream main. |
 
 ### The engine ceiling
 
 Everything below is designed against these limits, measured by upstream
-(`mods/cet/CyberpunkVRPort_HandCollision/init.lua` header):
+(`mods/cet/CyberpunkVRPort_HandCollision/init.lua` header, `vrport_basketball.reds`):
 
 - Hands and held weapons are **kinematic** colliders. They push dynamic props; nothing pushes
-  them back, and two kinematic bodies never interact. There is no physical blade-stops-in-body,
-  no weapon knocked from the hand, no recoil from a parry other than what we fake.
-- NPCs are animated, not simulated, until death. Hit reactions are a **fixed set** of animations;
-  we choose among them, we cannot add to them. Ragdoll and dismemberment happen on kill, natively.
-- Enemy AI stays the game's. We tune its numbers (damage, accuracy, cadence); we do not script new
-  behaviour.
-- Scripts can read tracked controller poses every frame (CET) and call native systems (redscript).
-  Damage, status effects, hit reactions and stats are all reachable from redscript.
+  them back, and two kinematic bodies never interact.
+- **Dynamic props can be driven**: redscript reaches the physical body of a dynamic entity and
+  `AddLinearImpulse` works (the basketball module is built on it). That is what grav gloves pull with.
+- NPCs are animated, not simulated, until death. Hit reactions are a **fixed set**; we choose
+  among them. Ragdoll and dismemberment happen on kill, natively.
+- The game's **entity outline** (`HighlightInstance`, what the scanner uses) can be driven from
+  script per entity. That is the grav-glove highlight.
+- Scripts read tracked controller poses every frame (CET) and call native systems (redscript).
 
-## 2. What exists today (upstream 0.1.7)
+## 3. Graphics
 
-| System | Upstream module(s) | What it does | Keep / replace |
-|---|---|---|---|
-| Melee | `CyberpunkVRPort_Weapon` (CET) + `CyberpunkVRPort_Melee` (reds) | Swing detection ≥2.5 m/s; blade-segment contact test; then fires the game's native melee `Attack_GameEffect` on that enemy, re-injecting the weapon's native damage. | **Replace** the attack half; keep swing/contact detection. |
-| Physical reload | `CyberpunkVRPort_Reload`, `TacticalBelt` | Drop mag (B), grab mag at belt (left grip), rack slide (R3). 13 weapons with authored hand poses. | **Keep**, extend to all weapons. |
-| Two-hand hold | plugin + `mods/config/*TwoHandGrip*.ini` | Off hand locks to captured pose; ~50 weapons. | Keep. |
-| Holsters | `CyberpunkVRPort_Holster` + Visual Holsters | Grip at body zone equips/unequips. | Keep; retune zones for Frame controllers. |
-| Hand collision | `CyberpunkVRPort_HandCollision` | Hands/fingers/weapon stop at the body. | Keep. |
-| Locomotion | plugin (`xr_movement_source`, snap turn, roomscale) | Stick, HMD/hand-relative, snap/smooth turn, native roomscale. | Keep; **add** teleport. |
-| Driving | `CyberpunkVRPort_Driving` + plugin wheel grab | Grip at wheel, tilt of hands steers; horn, throttle latch. | Keep; tune. |
-| Enemies | — | Nothing. | **Add** tuning layer. |
+- **Done:** eye-tracked foveation (`src/Render/Foveation.cpp`), on the engine's own VRS passes.
+  Recommended 0.15 / 0.30 / 4x4 with gaze; Adam is tuning upward after driving looked off.
+- **Next:** measure GPU ms on/off at 2560 + DLSS Quality + 90 Hz, then spend the headroom:
+  3072 or DLAA, framegen quality, sharpening. Any setting that survives goes in `docs/setup.md`.
+- **Open:** "looks weird driving" — establish whether that is periphery blockiness at speed
+  (radius) or a per-eye offset of the fovea (a bug in the eye→image mapping; VRCAM vs MAIN eye
+  assignment is `CyberpunkVR_MainIsRightEye`-dependent).
+- Candidate for an upstream PR once numbers exist (issue #86).
 
-## 3. Melee v2
+## 4. UI
+
+### 4.1 Weapon wheel in the world (Alyx-style) — first
+Tested 2026-10-12: the game's wheel works on the Frame but it is the full-screen UI, which is
+wrong in VR. The game's wheel is **not used**; the Y hold is intercepted before it reaches the game.
+- **What appears.** Holding Y spawns a ring of slots **anchored to the right hand**, ~12 cm
+  across, facing the head, with the game slowed as the native wheel does (same timescale hook).
+  Slots show the game's own weapon icons for the three weapon slots plus consumable/grenade,
+  drawn as a world widget the way the wrist readout is (render-to-texture on a hand-attached
+  plane; `CyberpunkVRPort_WristHud` is the template).
+- **Selection.** Hand displacement from where Y went down, projected onto the ring's plane.
+  Inside a 3 cm dead zone nothing is lit; beyond it the nearest sector lights (scale +
+  brightness) with a haptic tick on every change. Release Y to equip; release inside the dead
+  zone or press B to cancel.
+- **Equip.** Through the game's equipment system (`EquipmentSystem` request for slot N), the
+  same call the holster module makes, so draw animation, ammo and HUD behave.
+- **Where it lives.** CET for gesture and widget, redscript for the equip call. No C++. New
+  module `CyberpunkVRPort_HandWheel`; the Y mask is one line in the XInput merge beside the
+  existing D-pad chord mask.
+
+### 4.2 Later
+Inventory/map/phone as hand- or world-anchored panels instead of the head-locked quad.
+Not designed yet.
+
+## 5. Grav gloves
 
 ### Target feel
-- Damage happens because *my blade touched them*, scaled by *how fast I swung* and *how well the
-  edge was aligned*. No native attack state, no cooldown I didn't cause.
+Point a hand at something in reach of the gloves (~6 m): it lights up. Flick the wrist or pull
+the hand back with the grip held: it flies to the hand; close the grip as it arrives to catch.
+Miss the catch and it drops where it is. Works on loot and on loose physical objects.
+
+### Design
+1. **Candidate search (CET, each frame per hand).** A cone from the hand's aim pose (12° half
+   angle, 6 m) over (a) lootable world items and containers' visible items, via the targeting
+   system / interaction candidates the game already maintains, and (b) dynamic physical entities
+   (`gamePhysicalSystem` query or the entity list the basketball module walks). Nearest to the
+   cone axis wins; hysteresis so the highlight doesn't flicker between neighbours.
+2. **Highlight.** The game's outline (`HighlightInstance`) on the candidate, in the loot colour
+   for items and white for props; a short haptic tick when the candidate changes.
+3. **Pull gesture.** With a candidate lit and the grip held: hand velocity toward the body
+   ≥ 1.2 m/s along the hand→head line, or a wrist flick (angular speed ≥ 6 rad/s). One pull per
+   gesture episode.
+4. **Flight.**
+   - *Props:* `AddLinearImpulse` for a ballistic arc that lands at the hand's predicted position
+     ~0.5 s out (solve the impulse from mass and the target point; clamp so a heavy object
+     just slides). Mid-flight correction once at the apex, as Alyx does, so it arrives.
+   - *Loot items:* the item is not a physics body. Spawn the item's own world mesh as a
+     temporary dynamic prop at its location (the port already spawns props for the belt and
+     the ball), fly it the same way, and on arrival call the game's take-item interaction and
+     despawn the prop. If the spawn path proves unreliable for a given item, fall back to:
+     no flight, the item highlights and a pull takes it directly (still Alyx-like in function).
+5. **Catch.** Grip closed when the object is within 15 cm of the palm → attach to the hand
+   (held props use the existing hold mechanism from `CyberpunkVRPort_Hold`; weapons on the
+   ground equip through the equipment system). Grip open → it drops.
+6. **Throw** is the existing hand-release velocity path (basketball already throws).
+
+### Not in scope
+Pulling NPCs or anything the engine treats as static. Enemies' dropped weapons count as loot.
+
+### Spike (half a day, before building)
+On one street: list the interaction candidates the game exposes for a pointed hand; apply an
+impulse to a bottle toward the hand and see it arrive; spawn a loot item's mesh as a prop.
+Three yes/no answers decide how much of §5.4 is real.
+
+**Decisions needed:** which hand(s) (both, default); pull range 6 m ok; whether loot flight is
+worth the spawn complexity or direct take is enough for v1.
+
+## 6. Melee v2
+
+### Target feel
+- Damage happens because *my blade touched them*, scaled by *how fast I swung* and *how well
+  the edge was aligned*. No native attack state, no cooldown I didn't cause.
 - Enemies react in the direction and strength of the hit, from the game's own reactions.
 - Holding the blade in the path of an incoming strike **parries** it.
 - No canned player animation. Ever.
@@ -63,154 +140,64 @@ Everything below is designed against these limits, measured by upstream
    Blunt weapons ignore edge factor. Crits, armor and damage numbers run natively because the
    hit goes through the normal pipeline.
 3. **Reaction picker.** Choose the hit-reaction type and direction from contact point and
-   impulse, instead of letting the native attack choose: light → flinch, medium → stagger in
-   the direction of the swing, heavy (≥5 m/s or two-handed) → knockdown where the enemy type
-   allows it. Implemented as the `hitReactionType` / `hitDirection` fields on our hit event.
+   impulse: light → flinch, medium → stagger in the swing direction, heavy (≥5 m/s or
+   two-handed) → knockdown where the enemy type allows it.
 4. **Cadence.** One hit per enemy per swing *episode* (speed crossing the threshold, re-armed
    when the hand slows), so a single stroke through three enemies hits all three once.
 5. **Parry.** During an enemy melee attack's wind-up, if our blade segment intersects the
    enemy's weapon segment (or the attacking limb for unarmed), cancel their attack via the
-   game's parry/block path, play the clash FX and sound, apply a short stagger to them and a
-   wrist kick to us (reuse the recoil spring). Blocks by holding L-trigger stay as a fallback.
-6. **Feedback.** Controller haptics scaled by impulse; whoosh per swing as today; hit sound by
-   material from the game's own hit audio events.
-7. **Cyberware arms** (Mantis, Monowire, Gorilla) use the same path; the "blade" is the arm
-   segment.
+   game's parry/block path, play the clash FX and sound, a short stagger to them and a wrist
+   kick to us (reuse the recoil spring). L-trigger block stays as a fallback.
+6. **Feedback.** Haptics scaled by impulse; whoosh per swing as today; hit sound by material.
+7. **Cyberware arms** (Mantis, Monowire, Gorilla) use the same path; the "blade" is the arm.
 
 ### Not in scope
 Blade stopping in the body; enemies physically pushed; stabbing depth; new animations.
 
-### Spike before full build (1 day)
+### Spike (1 day, before building)
 Prove on a street thug that a script-built hit event through `DamageSystem` (a) applies
 damage with numbers and armor, (b) plays the reaction we asked for, (c) does not require the
 player to be in a melee attack state. If (c) fails, fall back to upstream's re-injection trick
 but with our damage model and reaction override.
 
-**Decisions needed:** damage curve numbers (above are a starting point); whether a flat-side hit
-should do token damage or none; whether knockdown is allowed on humans or reserved for heavy
-weapons.
+**Decisions (defaults unless Adam says otherwise):** flat-side hit does 35% damage; knockdown
+only from heavy two-handed swings, never from one-handed on humans; curve numbers as above.
 
-## 4. Guns
+## 7. Guns (after melee)
 
-### Target feel
-Every gun reloads by hand; every two-handed gun is held with two hands; guns live in holsters
-on the body, not in a menu.
-
-### Design
 1. **Reload for every weapon.** Upstream's reload is data-driven per weapon
-   (`reload/weapons/<name>.lua`: magazine slot, hand poses, stages). The 13 existing files are
-   the template. Add the remaining weapons in priority order: everything in Adam's current
-   loadout first, then by family. Where a weapon has no authored hand pose, reuse the closest
-   family pose (the file format already allows it). Shotguns and revolvers use the existing
-   shell/cylinder paths.
-2. **Rack and slide.** Keep R3 as the rack for now; later experiment: rack by pulling the
-   slide with the off hand (grip at the slide, pull back 6 cm) once the Frame mapping is settled.
-3. **Holsters.** Keep immersive holsters. Retune zone radii and positions after VRIK
-   calibration on the Frame; the current zones were tuned on Touch controllers.
-4. **Weapon wheel in the world (Alyx-style).** Tested 2026-10-12: the game's wheel works on the
-   Frame but it is the full-screen UI, which is the wrong thing in VR. The game's wheel is
-   **not used at all**; the Y hold is intercepted before it reaches the game.
-   - **What appears.** Holding Y spawns a ring of slots **anchored to the right hand**, ~12 cm
-     across, facing the head, with the game slowed as the native wheel does (same timescale
-     hook). Slots show the weapon icons the game already has (inkWidget atlas) for the three
-     weapon slots, plus consumables/grenade, drawn as a world widget the way the wrist readout
-     is (render-to-texture on a hand-attached plane: `CyberpunkVRPort_WristHud` is the template).
-   - **Selection.** Hand displacement from where Y went down, projected onto the ring's plane.
-     Inside a 3 cm dead zone nothing is lit; beyond it the nearest sector lights up (scale +
-     brightness), with a haptic tick on every change. Release Y to equip; release inside the
-     dead zone or press B to cancel.
-   - **Equip.** Through the game's equipment system (`EquipmentSystem` request for slot N), the
-     same call the holster module makes, so the draw animation, ammo and HUD all behave.
-   - **Where it lives.** CET for the gesture and widget (it already has hand poses and the
-     render-to-texture path), redscript for the equip call. No C++.
-   - **Mergeability.** A new `CyberpunkVRPort_HandWheel` module; the Y masking is a one-line
-     addition to the XInput merge next to the existing D-pad chord mask.
-5. **Ammo.** Belt magazines as today. Consider a finite belt (N mags, refilled from inventory
-   at a holster gesture) as an optional "hard" mode. Default: infinite belt.
-
-**Decisions needed:** Adam's priority weapon list; finite belt yes/no.
-
-## 5. Locomotion
-
-### Target feel
-Teleport as the default for comfort, with stick locomotion still available; turning by
-snap. Roomscale stays native.
-
-### Design (new plugin feature; this one needs C++)
-1. **Arc teleport.** Hold left stick forward (or a dedicated button once mapping is redesigned):
-   draw a parabola from the left hand; landing marker where it hits walkable ground
-   (`SyncRaycastByCollisionGroup` against Static, slope check, headroom check with a second
-   upward ray). Release to teleport.
-2. **Execution.** Move the player capsule with the game's own teleport path (the roomscale
-   module already documents that writing the camera position *teleports* the player, see
-   `docs/mirror_re.md`). Fade to black for ~120 ms around the move. Enemies do not lose
-   track of the player; no invulnerability.
-3. **Blink turn.** Snap turn as today; optional fade.
-4. **Rules.** No teleport while in a vehicle, mid-air, grappling, in cutscenes, or during
-   scripted scenes where the game owns the camera (the port already tracks a cutscene-suspend
-   tier; reuse it).
-5. **Switch.** Overlay setting `locomotion = teleport | stick`, remembered in `vrport.ini`.
-
-**Decisions needed:** which hand draws the arc; whether stick locomotion stays enabled at the
-same time (both at once is the common choice).
-
-## 6. Enemies
-
-### Target feel
-Fights paced for a player who aims and swings for real, without hit-scan reflexes. Not easier
-in the "lower difficulty" sense; *fairer* for VR.
-
-### Design (data only, TweakXL + one script)
-1. **Ranged enemies.** Lower accuracy at range and longer burst pauses: scale
-   `accuracy`/`spread` stats and the AI `shootingPattern` cooldowns per enemy archetype.
-2. **Melee enemies.** Longer wind-up before the strike lands so a parry is possible; lower
-   attack cadence; smaller lunge distance. These are attack-record and AI-preset values.
-3. **Incoming damage.** A global multiplier (default 0.8) as the comfort knob, separate from the
-   game's difficulty setting.
-4. **Reaction picker** (shared with Melee v2, §3.3).
-5. **Difficulty preset.** Ship as `r6/tweaks/vrport_enemies/*.yaml` with the multipliers at the
-   top of each file so Adam can tune without a rebuild.
-
-**Decisions needed:** starting multipliers; whether to touch netrunner enemies at all (their
-quickhack cadence is a separate set of values).
-
-## 7. Driving
-
-Upstream already does grip-the-wheel steering. Work here is tuning on the Frame: wheel grab
-radius, steering lock angle, deadzone, and the one-hand/two-hand feel. A hand-over-hand mode
-(steering by rotating the grabbed hand around the wheel hub instead of tilting the line between
-controllers) is a candidate if the tilt model feels wrong; measure first.
+   (`reload/weapons/<name>.lua`). The 13 existing files are the template; add Adam's loadout
+   first, then by family. Where a weapon has no authored pose, reuse the closest family pose.
+2. **Rack and slide.** Keep R3 for now; later: rack by pulling the slide with the off hand.
+3. **Holsters.** Retune zone radii after VRIK calibration on the Frame.
+4. **Ammo.** Infinite belt by default; finite belt as an optional hard mode.
 
 ## 8. Architecture
 
 ```
-mods/cet/CyberpunkVRPort_MeleeV2/          replaces CyberpunkVRPort_Weapon's melee half
-mods/redscript/CyberpunkVRPort_MeleeV2/     our attack record + hit path + parry
-mods/tweaks/vrport_melee/                   Attacks.VRMeleeContact_*.yaml
-mods/tweaks/vrport_enemies/                 enemy tuning
-mods/cet/CyberpunkVRPort_Reload/reload/weapons/<new>.lua   reload data for more weapons
-src/Runtimes/Teleport*.cpp                  the only planned C++ addition
+mods/cet/CyberpunkVRPort_HandWheel/        §4.1
+mods/cet/CyberpunkVRPort_GravGloves/       §5 gesture, candidates, flight
+mods/redscript/CyberpunkVRPort_GravGloves/ §5 impulses, spawn, take, highlight
+mods/cet/CyberpunkVRPort_MeleeV2/          §6, replaces the Weapon module's melee half
+mods/redscript/CyberpunkVRPort_MeleeV2/    §6 attack record, hit path, parry
+mods/tweaks/vrport_melee/                  Attacks.VRMeleeContact_*.yaml
+src/Render/Foveation.cpp                   §3 (done)
 ```
+- Upstream modules stay in the tree, disabled by flags they already honour; no
+  `@replaceMethod` on classes upstream already wraps.
+- Every tunable sits in `vrport.ini` or YAML, live where upstream already supports live reads.
 
-- Upstream's melee stays in the tree but is disabled by a flag it already honours
-  (`xr_melee` / the Weapon module's melee section), so a rebase never conflicts on it.
-- All new redscript lives under its own module names; no `@replaceMethod` on classes upstream
-  already wraps, to avoid double-wrapping after a rebase.
-- Every tunable number sits in `vrport.ini` or a YAML file, read live by the overlay where
-  upstream already supports live reads.
+## 9. Deferred notes (not planned)
 
-## 9. Test protocol per system
+- **Teleport:** arc from the left hand, landing marker via `SyncRaycastByCollisionGroup`,
+  fade, capsule teleport through the roomscale path (`docs/mirror_re.md`); blocked in
+  vehicles, mid-air, cutscenes. Needs C++.
+- **Enemies:** TweakXL multipliers for accuracy, burst pauses, melee wind-up and cadence; a
+  global incoming-damage multiplier; shares the reaction picker with §6.
+- **Driving:** tune wheel grab radius, lock angle and deadzone on the Frame; hand-over-hand
+  only if tilt steering proves wrong.
 
-Each milestone ships with a one-page test script (location, actions, pass criteria) and Adam
-reports in headset. Every input change re-runs the Phase 0 control table.
+## 10. Test protocol per system
 
-Melee v2 acceptance: a slow touch does nothing; a real swing kills a thug in the same number
-of hits as the flat game ±1; a head hit staggers; a parry visibly stops an incoming swing;
-three enemies in one stroke each take one hit.
-
-## 10. Open questions
-
-1. Can a script-built hit event play a chosen reaction without the native attack state? (§3 spike)
-2. Does the game's parry path accept a script trigger, or do we fake it with a stagger + attack cancel?
-3. Does the roomscale capsule teleport path survive a 10 m jump without the camera filters smoothing it? (§5.2)
-4. How much of the enemy AI cadence is in TweakDB vs. baked into AI trees? Determines how far §6 can go.
+Each milestone ships with a one-page test script (location, actions, pass criteria) in
+`docs/tests/`, and Adam reports in headset. Every input change re-runs the control table.
