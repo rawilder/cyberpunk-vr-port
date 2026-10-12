@@ -1,5 +1,6 @@
 #include "Utils/DebugGate.hpp"
 #include "Render/CommandResources.hpp"
+#include "Render/Foveation.hpp"
 #include "Render/GpuStageProfile.hpp"
 // openxr_capture.cpp - mono frame + depth capture and submit-resource setup.
 // Split verbatim from openxr_manager.cpp (OpenXRManager methods). Shared module
@@ -1247,6 +1248,8 @@ bool OpenXRManager::CaptureMonoPresentedFrame(ID3D12Resource* backBuffer, const 
                 m_monoCapturedFrame.framegenInputs[eye]=capturedInputs[eye];
                 m_monoCapturedFrame.fovs[eye] = fovs[eye];
                 m_monoCapturedFrame.hasView[eye] = hasView[eye];
+                // The frustum this eye was rendered with is what maps a gaze direction onto its image.
+                if (hasView[eye]) cvr::foveation::SetEyeFov(eye, fovs[eye].angleLeft, fovs[eye].angleRight, fovs[eye].angleUp, fovs[eye].angleDown);
             }
             SetD3DNamef(m_monoCapturedFrame.texture, L"OpenXR_mono_snapshot_serial%llu",
                 static_cast<unsigned long long>(serial));

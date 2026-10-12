@@ -1,6 +1,7 @@
 #include "Utils/DebugGate.hpp"
 #include "Hooks/AftermathDiagnostics.hpp"
 #include "Render/CommandResources.hpp"
+#include "Render/Foveation.hpp"
 #include "Render/NativeStereoProbe.hpp"
 #include "Render/StereoGpuProbe.hpp"
 #include "Render/StereoSceneState.hpp"
@@ -473,7 +474,9 @@ static void STDMETHODCALLTYPE ProbeShadingRate(ID3D12GraphicsCommandList5* list,
 }
 static void STDMETHODCALLTYPE ProbeShadingImage(ID3D12GraphicsCommandList5* list,ID3D12Resource* image) {
     const auto* e=command_list_hook_entry(list);if(!e || !e->shading_image_original)return;
-    e->shading_image_original(list,image);cvr::stereo::scene_state::ShadingRateImage(list,image);
+    // Foveation swaps the engine's shading-rate image for its own radial one at the bind;
+    // scene state keeps recording the NATIVE image, which is what the probe reasons about.
+    e->shading_image_original(list,cvr::foveation::Substitute(list,image));cvr::stereo::scene_state::ShadingRateImage(list,image);
 }
 static void patch_command_list_vtable(void* command_list) {
     if (!command_list) return;
@@ -484,7 +487,9 @@ static void patch_command_list_vtable(void* command_list) {
     if(count>=g_command_list_vtable_hooks.size())return;
     const bool probeEnabled=cvr::stereo::native_probe::Enabled();
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList5> list5;
-    const auto list5Result=probeEnabled?static_cast<ID3D12GraphicsCommandList*>(command_list)->QueryInterface(IID_PPV_ARGS(&list5)):E_NOINTERFACE;
+    // The two shading-rate slots (77/78) are hooked whenever the list exposes them, not only
+    // for the probe: foveation (Render/Foveation.cpp) needs the image bind in production.
+    const auto list5Result=static_cast<ID3D12GraphicsCommandList*>(command_list)->QueryInterface(IID_PPV_ARGS(&list5));
     const bool sameList5=SUCCEEDED(list5Result) && list5.Get()==command_list && *reinterpret_cast<void***>(list5.Get())==vtable;
 
     // Other render workers already use this shared vtable. Publish every

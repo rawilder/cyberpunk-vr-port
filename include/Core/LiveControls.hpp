@@ -101,6 +101,12 @@ struct LiveControls {
     volatile int xrHybridBodyRotation = 1; // upright head cone; tracked body yaw on looking down / bending
     volatile int xrBodyRotationMode = 3; // derived single-scalar publication; never serialize separately
     volatile int xrRoomscaleMovement = 1; // horizontal physical displacement through the native CCT
+    // Fixed foveated rendering (Render/Foveation.cpp): radial VRS image substituted for the engine's.
+    volatile int xrFoveation = 1;             // 0 = engine's own VRS image untouched
+    volatile float xrFoveationInner = 0.35f;  // full-rate radius, in half-widths of the view
+    volatile float xrFoveationOuter = 0.65f;  // coarsest rate beyond this radius; 2x2 between
+    volatile int xrFoveationRate = 4;         // 2 or 4: the coarsest rate (NxN)
+    volatile int xrFoveationGaze = 1;         // follow the eye-tracked gaze when the runtime provides one
     volatile float xrBodyFreeLookDeg = 10.0f;
     volatile float xrBodyMoveRadius = .10f; // metres; roomscale movement starts outside this radius
     volatile float xrBodyFreeLookDownDeg = 30.0f;

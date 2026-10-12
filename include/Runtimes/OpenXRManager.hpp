@@ -914,6 +914,11 @@ private:
     XrAction m_handPoseAction = XR_NULL_HANDLE;          // grip pose (palm) -- used by VRIK
     XrAction m_handAimPoseAction = XR_NULL_HANDLE;       // aim pose (pointing) -- used by hand-locomotion
     XrSpace  m_handAimSpaces[2] = { XR_NULL_HANDLE, XR_NULL_HANDLE };
+    // XR_EXT_eye_gaze_interaction: one pose action, no subaction paths, located in VIEW space each
+    // frame and handed to Render/Foveation.cpp. Null when the runtime lacks the extension.
+    XrAction m_eyeGazeAction = XR_NULL_HANDLE;
+    XrSpace  m_eyeGazeSpace = XR_NULL_HANDLE;
+    bool     m_eyeGazeSupported = false;
     // Gameplay input actions (synced each frame, exposed via GetControllerState).
     XrAction m_thumbstickAction = XR_NULL_HANDLE;        // Vector2f, per hand
     XrAction m_triggerAction = XR_NULL_HANDLE;           // Float, per hand

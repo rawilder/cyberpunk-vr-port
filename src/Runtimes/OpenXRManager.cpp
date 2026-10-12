@@ -3,6 +3,7 @@
 #include "Runtimes/HybridBodyYaw.hpp"
 #include "Anim/WheelGrab.hpp"   // the wheel-grab blends, for the hand smoothing below
 #include "Runtimes/OpenXRManager.hpp"
+#include "Render/Foveation.hpp"
 #include "Hooks/RoomscaleMove.hpp"
 #include "Camera/CameraLink.hpp"
 #include "Runtimes/SimulatorRecenter.hpp"
@@ -623,11 +624,15 @@ bool OpenXRManager::Init() {
                 } else if(strcmp(p.extensionName,cvr::input::SteamFrameExtension)==0) {
                     steamFrameEnabled=true;
                     extensions.push_back(cvr::input::SteamFrameExtension);
+                } else if(strcmp(p.extensionName,XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME)==0) {
+                    m_eyeGazeSupported=true;
+                    extensions.push_back(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME);
                 }
             }
         }
         Log("OpenXRManager: depth-layer (XR_KHR_composition_layer_depth) supported=%d\n", m_depthLayerSupported ? 1 : 0);
         Log("OpenXRManager: Steam Frame controller (%s) supported=%d\n",cvr::input::SteamFrameExtension,steamFrameEnabled?1:0);
+        Log("OpenXRManager: eye gaze (%s) supported=%d\n",XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME,m_eyeGazeSupported?1:0);
     }
 
     XrInstanceCreateInfo createInfo{XR_TYPE_INSTANCE_CREATE_INFO};
@@ -676,7 +681,10 @@ bool OpenXRManager::Init() {
     }
 
     XrSystemProperties systemProps{XR_TYPE_SYSTEM_PROPERTIES};
+    XrSystemEyeGazeInteractionPropertiesEXT eyeGazeProps{XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
+    if (m_eyeGazeSupported) systemProps.next = &eyeGazeProps;
     if (XR_SUCCEEDED(xrGetSystemProperties(m_instance, m_systemId, &systemProps))) {
+        if (m_eyeGazeSupported) Log("OpenXRManager: system supportsEyeGazeInteraction=%d\n", eyeGazeProps.supportsEyeGazeInteraction ? 1 : 0);
         strncpy_s(m_systemName, systemProps.systemName, _TRUNCATE);
         Log("OpenXRManager: OpenXR system vendorId=0x%X systemName=\"%s\" maxSwapchain=%ux%u maxLayerCount=%u positionTracking=%d orientationTracking=%d\n",
             systemProps.vendorId,
@@ -731,6 +739,11 @@ bool OpenXRManager::Init() {
         };
 
         makeAction(m_handPoseAction,        XR_ACTION_TYPE_POSE_INPUT,     "hand_pose",        "Hand Pose",            true);
+        // Eye gaze is a pose with no hand: the runtime reports it on /user/eyes_ext. Created
+        // whatever inputActionsEnabled says, because foveation wants it even in pose-only mode.
+        if (m_eyeGazeSupported) {
+            makeAction(m_eyeGazeAction, XR_ACTION_TYPE_POSE_INPUT, "eye_gaze", "Eye Gaze", false);
+        }
         // aim pose has a runtime-stable forward direction (-Z = pointing) that
         // is NOT mirrored between left/right grip poses. We use it for the
         // hand-locomotion yaw so the player walks where they point, not where
@@ -904,7 +917,13 @@ bool OpenXRManager::Init() {
         });
 
 bindings_done:
-        (void)0;
+        // The gaze profile is its own interaction profile, independent of which controller is
+        // in use, so it is suggested on every path above (pose-only included).
+        if (m_eyeGazeSupported && m_eyeGazeAction != XR_NULL_HANDLE) {
+            suggest("/interaction_profiles/ext/eye_gaze_interaction", {
+                { m_eyeGazeAction, "/user/eyes_ext/input/gaze_ext/pose" },
+            });
+        }
     }
 
     m_initialized = true;
@@ -1020,6 +1039,13 @@ bool OpenXRManager::InitGraphics(ID3D12Device* device, ID3D12CommandQueue* queue
                 aimSpaceInfo.poseInActionSpace.orientation.w = 1.0f;
                 xrCreateActionSpace(m_session, &aimSpaceInfo, &m_handAimSpaces[i]);
             }
+        }
+        if (m_eyeGazeAction != XR_NULL_HANDLE) {
+            XrActionSpaceCreateInfo gazeSpaceInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+            gazeSpaceInfo.action = m_eyeGazeAction;
+            gazeSpaceInfo.poseInActionSpace.orientation.w = 1.0f;
+            const XrResult gazeResult = xrCreateActionSpace(m_session, &gazeSpaceInfo, &m_eyeGazeSpace);
+            Log("OpenXRManager: eye gaze action space -> %d\n", gazeResult);
         }
     }
 
@@ -1867,6 +1893,46 @@ void OpenXRManager::FlushHandsToShared(const OpenXRHeadPose* frameHead, XrTime f
                     srcHands[h].oriX = relOri.x; srcHands[h].oriY = relOri.y;
                     srcHands[h].oriZ = relOri.z; srcHands[h].oriW = relOri.w;
                     CVR_DIAGNOSTIC(++CyberpunkVR_DebugHandPerFrameLocates);
+                }
+                // Gaze for foveation, at the same aim time as the hands, relative to the head
+                // (VIEW space): the frustum each eye renders is expressed in that frame.
+                if (m_eyeGazeSpace != XR_NULL_HANDLE) {
+                    XrEyeGazeSampleTimeEXT gazeSample{XR_TYPE_EYE_GAZE_SAMPLE_TIME_EXT};
+                    XrSpaceLocation gaze{XR_TYPE_SPACE_LOCATION};
+                    gaze.next = &gazeSample;
+                    XrVector3f dir{0.f, 0.f, -1.f};
+                    bool tracked = false;
+                    const XrResult gazeResult = xrLocateSpace(m_eyeGazeSpace, m_viewSpace, aim, &gaze);
+                    if (XR_SUCCEEDED(gazeResult) &&
+                        (gaze.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+                        dir = RotateVector(gaze.pose.orientation, XrVector3f{0.f, 0.f, -1.f});
+                        tracked = (gaze.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT) != 0;
+                    }
+                    cvr::foveation::SetGaze(dir.x, dir.y, dir.z, tracked);
+                    // Diagnostics: the first few samples, then one line every ~5 s, so a run that
+                    // never produces a tracked gaze says why (result, flags, action active, profile).
+                    static uint64_t gazeLogged = 0;
+                    static ULONGLONG gazeLastLogMs = 0;
+                    const ULONGLONG nowMs = GetTickCount64();
+                    if (gazeLogged < 3 || nowMs - gazeLastLogMs > 5000) {
+                        ++gazeLogged; gazeLastLogMs = nowMs;
+                        XrActionStateGetInfo getInfo{XR_TYPE_ACTION_STATE_GET_INFO};
+                        getInfo.action = m_eyeGazeAction;
+                        XrActionStatePose poseState{XR_TYPE_ACTION_STATE_POSE};
+                        const XrResult stateResult = xrGetActionStatePose(m_session, &getInfo, &poseState);
+                        XrPath eyesPath = XR_NULL_PATH;
+                        xrStringToPath(m_instance, "/user/eyes_ext", &eyesPath);
+                        XrInteractionProfileState profile{XR_TYPE_INTERACTION_PROFILE_STATE};
+                        const XrResult profileResult = xrGetCurrentInteractionProfile(m_session, eyesPath, &profile);
+                        char profileStr[256] = "(none)";
+                        if (XR_SUCCEEDED(profileResult) && profile.interactionProfile != XR_NULL_PATH) {
+                            uint32_t len = 0;
+                            xrPathToString(m_instance, profile.interactionProfile, sizeof(profileStr), &len, profileStr);
+                        }
+                        Log("OpenXRManager[Gaze]: locate=%d flags=0x%llx tracked=%d dir=(%.3f,%.3f,%.3f) sampleTime=%lld actionActive=%d (state=%d) profile=%s (%d)\n",
+                            gazeResult, static_cast<unsigned long long>(gaze.locationFlags), tracked ? 1 : 0, dir.x, dir.y, dir.z,
+                            static_cast<long long>(gazeSample.time), poseState.isActive ? 1 : 0, stateResult, profileStr, profileResult);
+                    }
                 }
             }
         }

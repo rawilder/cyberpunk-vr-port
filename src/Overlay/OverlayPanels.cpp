@@ -32,6 +32,7 @@
 #include "Utils/DebugGate.hpp"
 #include "Camera/CameraState.hpp"
 #include "Hooks/Reflex.hpp"
+#include "Render/Foveation.hpp"
 
 extern volatile int g_verboseLog; // per-frame log spam toggle (default off)
 extern void Log(const char* fmt, ...);
@@ -1037,6 +1038,22 @@ bool DrawLiveControls(LiveControlsUiState& state,int section) {
                 const int applied=cvr::reflex::GetAppliedMode();
                 const char* appliedName=applied==0?"Off":applied==1?"On":applied==2?"On + Boost":"Waiting for renderer";
                 ImGui::TextDisabled("Applied: %s",appliedName);
+                ImGui::Separator();
+                bool foveation=state.xrFoveation!=0;
+                if(ImGui::Checkbox("Foveated rendering",&foveation)){state.xrFoveation=foveation?1:0;changed=true;}
+                if(ImGui::IsItemHovered())ImGui::SetTooltip("Replaces the engine's variable-rate shading image with a radial one:\nfull detail where you look, coarser toward the edges.\nOnly affects passes the engine already shades at variable rate.");
+                if(foveation){
+                    bool gaze=state.xrFoveationGaze!=0;
+                    if(ImGui::Checkbox("Follow eye tracking",&gaze)){state.xrFoveationGaze=gaze?1:0;changed=true;}
+                    if(ImGui::IsItemHovered())ImGui::SetTooltip("Centre the full-detail region on your gaze (XR_EXT_eye_gaze_interaction).\nOff, or without eye data, it stays at the centre of each eye.");
+                    changed|=widgets::SliderFloat("Full-detail radius",&state.xrFoveationInner,0.10f,1.00f,"%.2f");
+                    if(ImGui::IsItemHovered())ImGui::SetTooltip("Radius of the 1x1 centre, as a fraction of the view's half-width.");
+                    changed|=widgets::SliderFloat("Coarsest beyond",&state.xrFoveationOuter,0.20f,1.50f,"%.2f");
+                    if(ImGui::IsItemHovered())ImGui::SetTooltip("Past this radius the coarsest rate applies; 2x2 in between.\nAbove ~1.0 the corners only.");
+                    int rate=state.xrFoveationRate>=4?1:0;
+                    if(widgets::Combo("Coarsest rate",&rate,"2x2\0""4x4\0")){state.xrFoveationRate=rate?4:2;changed=true;}
+                }
+                ImGui::TextDisabled("Foveation: %s",cvr::foveation::Status());
             }
             if (ImGui::CollapsingHeader("STEREO VIEW", ImGuiTreeNodeFlags_DefaultOpen)) {
                 changed |= DrawFovControl(state);

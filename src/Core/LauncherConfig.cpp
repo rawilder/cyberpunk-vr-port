@@ -157,6 +157,11 @@ void EnsureLiveControlFileExists() {
     fprintf(file, "xr_menu_follow_deg=60.0\n");
     fprintf(file, "xr_3dof_movement=0\n");
     fprintf(file, "xr_roomscale_movement=1\n");
+    fprintf(file, "xr_foveation=1\n");
+    fprintf(file, "xr_foveation_inner=0.350\n");
+    fprintf(file, "xr_foveation_outer=0.650\n");
+    fprintf(file, "xr_foveation_rate=4\n");
+    fprintf(file, "xr_foveation_gaze=1\n");
     fprintf(file, "xr_tracked_body_rotation=0\n");
     fprintf(file, "xr_hybrid_body_rotation=1\n");
     fprintf(file, "xr_body_free_look_deg=10.0\n");

@@ -16,6 +16,7 @@
 #include "Hooks/AnalogStick.hpp"
 #include "Hooks/Reflex.hpp"
 #include "Hooks/ReflexOptions.hpp"
+#include "Render/Foveation.hpp"
 #include <windows.h>
 #include <psapi.h>
 #include <xinput.h>
@@ -531,6 +532,11 @@ void PollLiveControls() {
     int xrTrackedBodyRotation = g_liveControls.xrTrackedBodyRotation;
     int xrHybridBodyRotation = g_liveControls.xrHybridBodyRotation;
     int xrRoomscaleMovement = g_liveControls.xrRoomscaleMovement;
+    int xrFoveation = g_liveControls.xrFoveation;
+    float xrFoveationInner = g_liveControls.xrFoveationInner;
+    float xrFoveationOuter = g_liveControls.xrFoveationOuter;
+    int xrFoveationRate = g_liveControls.xrFoveationRate;
+    int xrFoveationGaze = g_liveControls.xrFoveationGaze;
     int xrBreaststrokeSwim = g_liveControls.xrBreaststrokeSwim;
     int xrLadderGripClimb = g_liveControls.xrLadderGripClimb;
     int xrLadderAutoFinish = g_liveControls.xrLadderAutoFinish;
@@ -1268,6 +1274,16 @@ void PollLiveControls() {
             sscanf_s(line, "xr_roomscale_movement = %d", &intValue) == 1) {
             xrRoomscaleMovement = intValue;
         }
+        if (sscanf_s(line, "xr_foveation=%d", &intValue) == 1 ||
+            sscanf_s(line, "xr_foveation = %d", &intValue) == 1) xrFoveation = intValue;
+        if (sscanf_s(line, "xr_foveation_inner=%f", &value) == 1 ||
+            sscanf_s(line, "xr_foveation_inner = %f", &value) == 1) xrFoveationInner = value;
+        if (sscanf_s(line, "xr_foveation_outer=%f", &value) == 1 ||
+            sscanf_s(line, "xr_foveation_outer = %f", &value) == 1) xrFoveationOuter = value;
+        if (sscanf_s(line, "xr_foveation_rate=%d", &intValue) == 1 ||
+            sscanf_s(line, "xr_foveation_rate = %d", &intValue) == 1) xrFoveationRate = intValue;
+        if (sscanf_s(line, "xr_foveation_gaze=%d", &intValue) == 1 ||
+            sscanf_s(line, "xr_foveation_gaze = %d", &intValue) == 1) xrFoveationGaze = intValue;
         if (sscanf_s(line, "xr_tracked_body_rotation = %d", &intValue) == 1) xrTrackedBodyRotation=intValue;
         if (sscanf_s(line, "xr_hybrid_body_rotation = %d", &intValue) == 1) xrHybridBodyRotation=intValue;
         if (sscanf_s(line, "xr_physical_body_rotation=%d", &intValue) == 1 ||
@@ -1465,6 +1481,14 @@ void PollLiveControls() {
     g_liveControls.xrBodyRotationMode=static_cast<int>(cvr::body::RotationModeFromFlags(
         xrPhysicalBodyRotation,xrTrackedBodyRotation,xrHybridBodyRotation));
     g_liveControls.xrRoomscaleMovement = xrRoomscaleMovement != 0 ? 1 : 0;
+    g_liveControls.xrFoveation = xrFoveation != 0 ? 1 : 0;
+    g_liveControls.xrFoveationInner = xrFoveationInner;
+    g_liveControls.xrFoveationOuter = xrFoveationOuter;
+    g_liveControls.xrFoveationRate = xrFoveationRate >= 4 ? 4 : 2;
+    g_liveControls.xrFoveationGaze = xrFoveationGaze != 0 ? 1 : 0;
+    cvr::foveation::SetSettings({g_liveControls.xrFoveation, g_liveControls.xrFoveationInner,
+                                 g_liveControls.xrFoveationOuter, g_liveControls.xrFoveationRate,
+                                 g_liveControls.xrFoveationGaze});
     g_liveControls.xrBreaststrokeSwim = xrBreaststrokeSwim != 0 ? 1 : 0;
     g_liveControls.xrLadderGripClimb = xrLadderGripClimb != 0 ? 1 : 0;
     g_liveControls.xrLadderAutoFinish = xrLadderAutoFinish != 0 ? 1 : 0;
@@ -1736,6 +1760,11 @@ LiveControlsUiState MakeLiveControlsUiState() {
     state.xrTrackedBodyRotation = bodyMode==cvr::body::RotationMode::Tracked;
     state.xrHybridBodyRotation = bodyMode==cvr::body::RotationMode::Hybrid;
     state.xrRoomscaleMovement = g_liveControls.xrRoomscaleMovement;
+    state.xrFoveation = g_liveControls.xrFoveation;
+    state.xrFoveationInner = g_liveControls.xrFoveationInner;
+    state.xrFoveationOuter = g_liveControls.xrFoveationOuter;
+    state.xrFoveationRate = g_liveControls.xrFoveationRate;
+    state.xrFoveationGaze = g_liveControls.xrFoveationGaze;
     state.xrBreaststrokeSwim = g_liveControls.xrBreaststrokeSwim;
     state.xrLadderGripClimb = g_liveControls.xrLadderGripClimb;
     state.xrLadderAutoFinish=g_liveControls.xrLadderAutoFinish;
@@ -2012,6 +2041,11 @@ void PersistLiveControlsUiState(const LiveControlsUiState& state) {
     fprintf(file, "xr_tracked_body_rotation=%d\n", state.xrTrackedBodyRotation != 0 ? 1 : 0);
     fprintf(file, "xr_hybrid_body_rotation=%d\n", state.xrHybridBodyRotation != 0 ? 1 : 0);
     fprintf(file, "xr_roomscale_movement=%d\n", state.xrRoomscaleMovement != 0 ? 1 : 0);
+    fprintf(file, "xr_foveation=%d\n", state.xrFoveation != 0 ? 1 : 0);
+    fprintf(file, "xr_foveation_inner=%.3f\n", state.xrFoveationInner);
+    fprintf(file, "xr_foveation_outer=%.3f\n", state.xrFoveationOuter);
+    fprintf(file, "xr_foveation_rate=%d\n", state.xrFoveationRate >= 4 ? 4 : 2);
+    fprintf(file, "xr_foveation_gaze=%d\n", state.xrFoveationGaze != 0 ? 1 : 0);
     fprintf(file, "xr_breaststroke_swim=%d\n", state.xrBreaststrokeSwim != 0 ? 1 : 0);
     fprintf(file, "xr_ladder_grip_climb=%d\n", state.xrLadderGripClimb != 0 ? 1 : 0);
     fprintf(file, "xr_ladder_auto_finish=%d\nxr_ladder_finish_distance=%.3f\n",state.xrLadderAutoFinish!=0 ? 1:0,state.xrLadderFinishDistance);
@@ -2122,6 +2156,14 @@ extern "C" void SetLiveControlsUiState(const LiveControlsUiState* state, int per
     g_liveControls.xrBodyRotationMode=static_cast<int>(cvr::body::RotationModeFromFlags(
         state->xrPhysicalBodyRotation,state->xrTrackedBodyRotation,state->xrHybridBodyRotation));
     g_liveControls.xrRoomscaleMovement = state->xrRoomscaleMovement != 0 ? 1 : 0;
+    g_liveControls.xrFoveation = state->xrFoveation != 0 ? 1 : 0;
+    g_liveControls.xrFoveationInner = state->xrFoveationInner;
+    g_liveControls.xrFoveationOuter = state->xrFoveationOuter;
+    g_liveControls.xrFoveationRate = state->xrFoveationRate >= 4 ? 4 : 2;
+    g_liveControls.xrFoveationGaze = state->xrFoveationGaze != 0 ? 1 : 0;
+    cvr::foveation::SetSettings({g_liveControls.xrFoveation, g_liveControls.xrFoveationInner,
+                                 g_liveControls.xrFoveationOuter, g_liveControls.xrFoveationRate,
+                                 g_liveControls.xrFoveationGaze});
     g_liveControls.xrBreaststrokeSwim = state->xrBreaststrokeSwim != 0 ? 1 : 0;
     g_liveControls.xrLadderGripClimb = state->xrLadderGripClimb != 0 ? 1 : 0;
     g_liveControls.xrLadderAutoFinish=state->xrLadderAutoFinish!=0 ? 1:0;
