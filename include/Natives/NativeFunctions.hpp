@@ -331,3 +331,6 @@ void VRWorldToModel(RED4ext::IScriptable* aContext, RED4ext::CStackFrame* aFrame
 void VROverlayCommand(RED4ext::IScriptable*,RED4ext::CStackFrame*,int32_t*,int64_t);
 void VROverlayMenu(RED4ext::IScriptable*,RED4ext::CStackFrame*,bool*,int64_t);
 void VROverlayToggle(RED4ext::IScriptable*,RED4ext::CStackFrame*,void*,int64_t);
+void VRHandWheelCommand(RED4ext::IScriptable*,RED4ext::CStackFrame*,int32_t*,int64_t);
+void VRHandWheelLabels(RED4ext::IScriptable*,RED4ext::CStackFrame*,void*,int64_t);
+void VRHandWheelOpen(RED4ext::IScriptable*,RED4ext::CStackFrame*,bool*,int64_t);

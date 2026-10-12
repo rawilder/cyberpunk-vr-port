@@ -1661,7 +1661,7 @@ DWORD OpenXRManager::FrameThreadMain() {
                     auto& uiHand=uiTracking.hands[i];
                     uiHand.stickClick=sclick;uiHand.trigger=trig;uiHand.grip=grip;uiHand.stickY=sy;
                     uiHand.valid=poseValid;
-                    if((cvr::vrui::Visible() || cvr::vrui::CapturesInput() || sclick) && m_handAimSpaces[i]!=XR_NULL_HANDLE){
+                    if((cvr::vrui::Visible() || cvr::vrui::CapturesInput() || sclick || (i==1 && cvr::handwheel::WantsTracking())) && m_handAimSpaces[i]!=XR_NULL_HANDLE){
                         uiHand.valid=false;
                         XrSpaceLocation aim{XR_TYPE_SPACE_LOCATION};
                         constexpr auto need=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
@@ -1739,6 +1739,7 @@ DWORD OpenXRManager::FrameThreadMain() {
                 // The overlay reads RAW clicks first: L3+R3 takes priority over
                 // cyberware even when the left grip is held too.
                 cvr::vrui::UpdateTracking(uiTracking);
+                cvr::handwheel::UpdateTracking(uiTracking);
                 const bool cyberwareClaim=cvr::input::UpdateCyberwareChord(leftStickClicked,ctrl.leftGrip,
                     uiTracking.hands[1].stickClick,gameplayInputActive);
                 if(cyberwareClaim) {
@@ -2489,7 +2490,7 @@ DWORD OpenXRManager::FrameThreadMain() {
                         if (releaseOk) {
                             XrCompositionLayerProjection layerProj{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
                             XrCompositionLayerQuad layerQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
-                            const XrCompositionLayerBaseHeader* layers[1+2*cvr::hud::ChannelCount+3] = {};
+                            const XrCompositionLayerBaseHeader* layers[1+2*cvr::hud::ChannelCount+4] = {}; // +1: the hand wheel
 
                             if (menuRectActive) {
                                 layerQuad.space = m_localSpace;
@@ -2566,6 +2567,8 @@ DWORD OpenXRManager::FrameThreadMain() {
                                 layers[endInfo.layerCount++]=panel;
                                 if(const auto* ray=m_settingsPanel.Ray())layers[endInfo.layerCount++]=ray;
                             }
+                            if(const auto* wheel=m_handWheel.Prepare(m_session,m_localSpace,m_d3dDevice,m_d3dQueue))
+                                layers[endInfo.layerCount++]=wheel;
                             CVR_DIAGNOSTIC(CyberpunkVR_DebugXrEnds.fetch_add(1, std::memory_order_relaxed));
                             CVR_DIAGNOSTIC(CyberpunkVR_DebugXrEndsWithLayer.fetch_add(1, std::memory_order_relaxed));
                             // HOW OLD IS THE IMAGE WE ARE SUBMITTING. Recorded here rather than at the

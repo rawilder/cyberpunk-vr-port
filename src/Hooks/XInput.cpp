@@ -294,6 +294,15 @@ DWORD WINAPI HookedXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
             OpenXRManager::Get().SetSharedSlot(slot,0);
         PublishMergedPacket(pState);return r;
     }
+    // Hand-anchored weapon wheel: while the right Y is held (or the wheel is open) the game
+    // never sees Y or B, so its own full-screen wheel cannot open. A short tap is replayed
+    // as a brief press afterwards, so tap-to-cycle still works.
+    if (cvr::handwheel::UpdateInput(vr, GetTickCount64())) {
+        vr.buttons &= static_cast<uint16_t>(~(0x8000 | 0x2000));
+        pState->Gamepad.wButtons &= static_cast<uint16_t>(~(0x8000 | 0x2000));
+    } else if (cvr::handwheel::PulseY()) {
+        vr.buttons |= 0x8000;
+    }
     const auto swim=cvr::swimming::UpdateInput(vr,vr.leftThumbY<-.2f || pState->Gamepad.sThumbLY<-6553);
     const bool inWater=cvr::swimming::Active();
     cvr::ladder::UpdateInput(vr);

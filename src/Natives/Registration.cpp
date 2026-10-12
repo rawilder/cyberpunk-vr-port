@@ -29,6 +29,12 @@ RED4EXT_C_EXPORT void RED4EXT_CALL PostRegisterTypes() {
     uiMenu->flags=flags;uiMenu->AddParam("Bool","ready");uiMenu->AddParam("Bool","inGame");uiMenu->AddParam("String","labels");uiMenu->SetReturnType("Bool");rtti->RegisterFunction(uiMenu);
     auto uiToggle=RED4ext::CGlobalFunction::Create("VROverlayToggle","VROverlayToggle",&VROverlayToggle);
     uiToggle->flags=flags;rtti->RegisterFunction(uiToggle);
+    auto wheelCommand=RED4ext::CGlobalFunction::Create("VRHandWheelCommand","VRHandWheelCommand",&VRHandWheelCommand);
+    wheelCommand->flags=flags;wheelCommand->SetReturnType("Int32");rtti->RegisterFunction(wheelCommand);
+    auto wheelLabels=RED4ext::CGlobalFunction::Create("VRHandWheelLabels","VRHandWheelLabels",&VRHandWheelLabels);
+    wheelLabels->flags=flags;wheelLabels->AddParam("String","labels");rtti->RegisterFunction(wheelLabels);
+    auto wheelOpen=RED4ext::CGlobalFunction::Create("VRHandWheelOpen","VRHandWheelOpen",&VRHandWheelOpen);
+    wheelOpen->flags=flags;wheelOpen->SetReturnType("Bool");rtti->RegisterFunction(wheelOpen);
 
     auto fHudPanel=RED4ext::CGlobalFunction::Create("VRHudPanelUpdate","VRHudPanelUpdate",&VRHudPanelUpdate);
     fHudPanel->flags=flags; fHudPanel->AddParam("handle:inkWidget","root");

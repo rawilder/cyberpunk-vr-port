@@ -3,6 +3,7 @@
 #include "Framegen/Presenter.hpp"
 #include "Framegen/StatsOverlay.hpp"
 #include "Overlay/VrPanel.hpp"
+#include "Overlay/HandWheel.hpp"
 
 #include <windows.h>
 #include <d3d12.h>
@@ -1358,6 +1359,7 @@ private:
     cvr::hud::Quad m_basiliskQuad{cvr::hud::Channel::Basilisk};
     cvr::hud::Quad m_surveillanceQuad{cvr::hud::Channel::Surveillance};
     cvr::vrui::Panel m_settingsPanel;
+    cvr::handwheel::Wheel m_handWheel;
     cvr::hud::Follow m_menuFollow;
     cvr::hud::DisplayClock m_menuClock;
     bool  m_menuEyeAnchorValid = false;// projection-path per-eye anchor latched
