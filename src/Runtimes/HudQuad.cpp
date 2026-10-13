@@ -147,12 +147,20 @@ const XrCompositionLayerBaseHeader* Quad::Prepare(XrSession session, XrSpace spa
     SetConsumerReady((tracked || follow.valid) && eyesReady,channel);
     if(!eyesReady)return nullptr;
     if (!publishedMasked) return nullptr; // Preparation succeeded; UI may now mask the native slots.
+    float dt=0.f;
+    if(channel==Channel::Wheel) {
+        // On the hand, facing the head: the pose comes from the hand-wheel module, which
+        // captured it when the Y hold began. No follow, no cone, a fixed physical size.
+        if(!handAnchorValid)return nullptr;
+        anchor=handAnchor;follow.valid=true;follow.following=false;
+        layer.size={handWidth,handWidth*static_cast<float>(height)/static_cast<float>(width)};
+    } else {
     const bool headLocked=channel==Channel::Basilisk || channel==Channel::Surveillance;
     const int wantedMode=headLocked?2:(channel==Channel::Main?g_liveControls.xrHudFollowMode:0);
     if (originSerial!=origin || followMode!=wantedMode) {
         follow.Reset();clock.Reset();originSerial=origin;followMode=wantedMode;
     }
-    const float dt=clock.Step(displayTime);
+    dt=clock.Step(displayTime);
     if (tracked) {
         const auto& q=head.orientation;
         const float headYaw=HeadYaw(q.x,q.y,q.z,q.w,follow.valid?follow.yaw:bodyYaw);
@@ -179,6 +187,7 @@ const XrCompositionLayerBaseHeader* Quad::Prepare(XrSession session, XrSpace spa
         const float h=2.0f*distance*tanf(fov*0.5f);
         layer.size={h*width/height,h};
     } else { follow.ResetDelay(); clock.Reset(); }
+    }
     if (!follow.valid) return nullptr;
     layer.pose=anchor;
     layer.layerFlags=XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;

@@ -29,7 +29,11 @@ public:
         return secondEye ? reinterpret_cast<const XrCompositionLayerBaseHeader*>(&rightLayer) : nullptr;
     }
     void Shutdown();
+    // Channel::Wheel only: the quad sits at this pose (LOCAL space) at this physical width,
+    // instead of following the head. Null = not shown.
+    void SetHandAnchor(const XrPosef* pose,float widthMetres){handAnchorValid=pose!=nullptr;if(pose)handAnchor=*pose;handWidth=widthMetres;}
 private:
+    XrPosef handAnchor{{0,0,0,1},{0,0,0}};bool handAnchorValid=false;float handWidth=0.18f;
     Channel channel;
     bool Ensure(XrSession session, ID3D12Device* device, uint32_t width, uint32_t height);
     void RetireCompleted(uint64_t completed);

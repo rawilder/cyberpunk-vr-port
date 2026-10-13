@@ -2490,7 +2490,7 @@ DWORD OpenXRManager::FrameThreadMain() {
                         if (releaseOk) {
                             XrCompositionLayerProjection layerProj{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
                             XrCompositionLayerQuad layerQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
-                            const XrCompositionLayerBaseHeader* layers[1+2*cvr::hud::ChannelCount+4] = {}; // +1: the hand wheel
+                            const XrCompositionLayerBaseHeader* layers[1+2*cvr::hud::ChannelCount+4] = {}; // +1: the drawn hand wheel (Wheel channel is counted in ChannelCount)
 
                             if (menuRectActive) {
                                 layerQuad.space = m_localSpace;
@@ -2559,6 +2559,22 @@ DWORD OpenXRManager::FrameThreadMain() {
                                 layers[endInfo.layerCount++]=surveillance;
                                 if(const auto* other=m_surveillanceQuad.SecondEye())layers[endInfo.layerCount++]=other;
                             }
+                            {
+                                // The game's own weapon wheel, on the right hand. Visible only while
+                                // the hand-wheel module holds an anchor (Y held) AND the game has
+                                // the wheel entry up; the module is told which, for stick synthesis.
+                                XrPosef wheelPose{};
+                                const bool anchored=cvr::handwheel::NativeAnchor(wheelPose);
+                                m_wheelQuad.SetHandAnchor(anchored?&wheelPose:nullptr,CyberpunkVR_HandWheelSize);
+                                const auto* wheel=m_wheelQuad.Prepare(m_session,m_localSpace,m_d3dDevice,m_d3dQueue,
+                                    !menuRectActive,hudTracked,hudHead.pose,GetTrackingOriginSerial(),
+                                    frameState.predictedDisplayTime,hudEyes?eyeOffsets:nullptr,hudBodyYaw);
+                                cvr::handwheel::SetNativeVisible(wheel!=nullptr);
+                                if(wheel){
+                                    layers[endInfo.layerCount++]=wheel;
+                                    if(const auto* other=m_wheelQuad.SecondEye())layers[endInfo.layerCount++]=other;
+                                }
+                            }
                             if(const auto* metrics=m_framegenOverlay.Prepare(m_session,m_viewSpace,m_d3dDevice,m_d3dQueue,
                                 m_localSpace,hudTracked?&hudHead.pose:nullptr,GetTrackingOriginSerial(),frameState.predictedDisplayTime))
                                 layers[endInfo.layerCount++]=metrics;
@@ -2567,8 +2583,9 @@ DWORD OpenXRManager::FrameThreadMain() {
                                 layers[endInfo.layerCount++]=panel;
                                 if(const auto* ray=m_settingsPanel.Ray())layers[endInfo.layerCount++]=ray;
                             }
-                            if(const auto* wheel=m_handWheel.Prepare(m_session,m_localSpace,m_d3dDevice,m_d3dQueue))
-                                layers[endInfo.layerCount++]=wheel;
+                            if(cvr::handwheel::DrawnMode())
+                                if(const auto* wheel=m_handWheel.Prepare(m_session,m_localSpace,m_d3dDevice,m_d3dQueue))
+                                    layers[endInfo.layerCount++]=wheel;
                             CVR_DIAGNOSTIC(CyberpunkVR_DebugXrEnds.fetch_add(1, std::memory_order_relaxed));
                             CVR_DIAGNOSTIC(CyberpunkVR_DebugXrEndsWithLayer.fetch_add(1, std::memory_order_relaxed));
                             // HOW OLD IS THE IMAGE WE ARE SUBMITTING. Recorded here rather than at the

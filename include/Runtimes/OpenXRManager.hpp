@@ -1358,6 +1358,7 @@ private:
     cvr::hud::Quad m_interactionQuad{cvr::hud::Channel::Interaction};
     cvr::hud::Quad m_basiliskQuad{cvr::hud::Channel::Basilisk};
     cvr::hud::Quad m_surveillanceQuad{cvr::hud::Channel::Surveillance};
+    cvr::hud::Quad m_wheelQuad{cvr::hud::Channel::Wheel};
     cvr::vrui::Panel m_settingsPanel;
     cvr::handwheel::Wheel m_handWheel;
     cvr::hud::Follow m_menuFollow;

@@ -2243,10 +2243,12 @@ void OpenXRManager::Shutdown() {
     m_interactionQuad.Shutdown();
     m_basiliskQuad.Shutdown();
     m_surveillanceQuad.Shutdown();
+    m_wheelQuad.Shutdown();
     cvr::hud::Shutdown();
     cvr::hud::Shutdown(cvr::hud::Channel::Interaction);
     cvr::hud::Shutdown(cvr::hud::Channel::Basilisk);
     cvr::hud::Shutdown(cvr::hud::Channel::Surveillance);
+    cvr::hud::Shutdown(cvr::hud::Channel::Wheel);
     EndSession();
 
     for (auto& eye : m_eyeSwapchains) {

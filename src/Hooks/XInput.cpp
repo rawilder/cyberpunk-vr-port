@@ -297,11 +297,21 @@ DWORD WINAPI HookedXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
     // Hand-anchored weapon wheel: while the right Y is held (or the wheel is open) the game
     // never sees Y or B, so its own full-screen wheel cannot open. A short tap is replayed
     // as a brief press afterwards, so tap-to-cycle still works.
+    // In native mode the game's own wheel opens on the Y hold as usual; while it is up on the
+    // hand, the right stick the game reads is synthesized from hand displacement and the real
+    // stick is taken away from turn / dash / crouch below.
     if (cvr::handwheel::UpdateInput(vr, GetTickCount64())) {
         vr.buttons &= static_cast<uint16_t>(~(0x8000 | 0x2000));
         pState->Gamepad.wButtons &= static_cast<uint16_t>(~(0x8000 | 0x2000));
     } else if (cvr::handwheel::PulseY()) {
         vr.buttons |= 0x8000;
+    }
+    float wheelSx=0.f, wheelSy=0.f;
+    const bool wheelNative = cvr::handwheel::NativeStick(wheelSx, wheelSy);
+    if (wheelNative) {
+        pState->Gamepad.sThumbRX = FloatToSHORT(wheelSx);
+        pState->Gamepad.sThumbRY = FloatToSHORT(wheelSy);
+        vr.rightThumbX = 0.f; vr.rightThumbY = 0.f;
     }
     const auto swim=cvr::swimming::UpdateInput(vr,vr.leftThumbY<-.2f || pState->Gamepad.sThumbLY<-6553);
     const bool inWater=cvr::swimming::Active();
@@ -397,7 +407,7 @@ DWORD WINAPI HookedXInputGetState(DWORD dwUserIndex, XINPUT_STATE* pState) {
         // PUBLISHED FOR THE SCENE YAW. The camera composition needs the look axis on frames where
         // the game does nothing with it -- see g_sceneStickYawRad in PatchCamera.cpp. Taken after
         // the merge so it is the axis the game is being handed, controller or pad alike.
-        g_lookStickX.store(pState->Gamepad.sThumbRX / 32767.0f, std::memory_order_relaxed);
+        g_lookStickX.store(wheelNative ? 0.f : pState->Gamepad.sThumbRX / 32767.0f, std::memory_order_relaxed);
         if (fabsf(vr.rightThumbY) > fabsf(pState->Gamepad.sThumbRY / 32767.0f))
             pState->Gamepad.sThumbRY = FloatToSHORT(vr.rightThumbY);
         // The discrete ones go down; the analog trigger slots keep their real value, because the hands'

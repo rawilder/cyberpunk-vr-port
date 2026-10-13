@@ -40,6 +40,22 @@ local function updatePhoneBounds(layer)
     local second = os.time()
     if second ~= scanSecond then
         scanSecond = second
+        -- Diagnostic: the HUD game controllers by class with their root/window names, once per
+        -- distinct set. Pairs with the plugin's [hud-panel] entry list for routing a new channel.
+        do
+            local names = {}
+            for _, c in ipairs(layer:GetGameControllers()) do
+                local root = c:GetRootWidget(); local window = root and root:GetParentWidget()
+                names[#names + 1] = NameToString(c:GetClassName()) .. "/" .. (root and NameToString(root:GetName()) or "?")
+                    .. "/" .. (window and NameToString(window:GetName()) or "?")
+            end
+            table.sort(names)
+            local joined = table.concat(names, ", ")
+            if joined ~= M.dumpedControllers then
+                M.dumpedControllers = joined
+                print("[HudPanel] controllers (class/root/window): " .. joined)
+            end
+        end
         phoneRoots = {}
         local previousSubtitles=subtitleRoots
         subtitleRoots = {}

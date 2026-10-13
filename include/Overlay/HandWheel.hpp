@@ -18,7 +18,16 @@ struct VRControllerState;
 // Drawn as its own OpenXR quad layer with a CPU canvas (the framegen stats overlay is the
 // template), so no game asset is involved. Labels come from CET through VRHandWheelLabels;
 // choices go back through VRHandWheelCommand (0 nothing, 1 opened, 2 closed, 100+i chosen).
+extern "C" __declspec(dllexport) extern float CyberpunkVR_HandWheelSize;
+
 namespace cvr::handwheel {
+// Mode 1 (default): the GAME's radial wheel is re-hosted on the hand (HUD channel Wheel) and
+// steered by hand displacement through a synthesized right stick; Y reaches the game.
+// Mode 0: the module draws its own wheel (below) and equips through CET.
+bool DrawnMode();
+bool NativeAnchor(XrPosef& out);           // where the native wheel quad sits, while Y is held
+bool NativeStick(float& x,float& y);       // synthesized right stick while the native wheel is up
+void SetNativeVisible(bool);               // the frame loop reports whether the wheel quad was shown
 void SetLabels(const char* pipeSeparated);
 int PollCommand();
 bool Open();

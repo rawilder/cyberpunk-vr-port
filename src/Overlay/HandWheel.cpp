@@ -7,15 +7,18 @@
 #include <deque>
 #include <mutex>
 #include <string>
+#pragma comment(lib,"gdi32.lib")
+#pragma comment(lib,"user32.lib")
 
 extern "C" __declspec(dllexport) int32_t CyberpunkVR_HandWheel = 1;          // 0 disables the wheel entirely
 extern "C" __declspec(dllexport) int32_t CyberpunkVR_HandWheelHoldMs = 180;  // Y hold before the wheel opens
 extern "C" __declspec(dllexport) float   CyberpunkVR_HandWheelDeadZone = 0.03f; // metres of hand travel before a sector lights
 extern "C" __declspec(dllexport) float   CyberpunkVR_HandWheelSize = 0.16f;     // quad edge, metres
+extern "C" __declspec(dllexport) int32_t CyberpunkVR_HandWheelMode = 1;         // 1 = the game's wheel on the hand, 0 = drawn wheel
 
 namespace cvr::handwheel {
 namespace {
-constexpr uint32_t kCanvas=256;
+constexpr uint32_t kCanvas=512;
 constexpr float kPi=3.14159265358979f;
 
 struct V3 {float x,y,z;};
@@ -36,12 +39,14 @@ XrQuaternionf FromBasis(const V3& r,const V3& u,const V3& f) {
 
 struct State {
     std::mutex mutex;
-    std::vector<std::string> labels{"1","2","3","HOLSTER"};
+    std::vector<std::string> labels{"1","2","3","Holster"};
     std::deque<int> commands;
     cvr::vrui::Tracking tracking{};
     bool open{},yWas{},bWas{};
     unsigned long long yDownMs{},pulseUntilMs{};
     XrVector3f anchor{};V3 r{1,0,0},u{0,1,0},f{0,0,1};
+    bool anchored{},nativeVisible{};   // native mode: Y held long enough to place the quad / the quad was shown
+    float stickX{},stickY{};           // native mode: synthesized right stick from hand displacement
     int selection=-1;
     uint64_t generation=1;   // bumped whenever the drawn content changes
     XrPosef pose{{0,0,0,1},{}};
@@ -60,65 +65,116 @@ void Rebase() {
     g.pose.position={p.x+lift.x,p.y+lift.y,p.z+lift.z};
 }
 
-// 5x7 glyphs, the same bounded alphabet the stats overlay draws with.
-const uint8_t* Glyph(char c) {
-    static constexpr uint8_t digits[][5]={{62,81,73,69,62},{0,66,127,64,0},{66,97,81,73,70},{33,65,69,75,49},{24,20,18,127,16},
-        {39,69,69,69,57},{60,74,73,73,48},{1,113,9,5,3},{54,73,73,73,54},{6,73,73,41,30}};
-    static constexpr uint8_t letters[][5]={{126,17,17,17,126},{127,73,73,73,54},{62,65,65,65,34},{127,65,65,34,28},
-        {127,73,73,73,65},{127,9,9,9,1},{62,65,73,73,122},{127,8,8,8,127},{0,65,127,65,0},{32,64,65,63,1},
-        {127,8,20,34,65},{127,64,64,64,64},{127,2,12,2,127},{127,4,8,16,127},{62,65,65,65,62},{127,9,9,9,6},
-        {62,65,81,33,94},{127,9,25,41,70},{70,73,73,73,49},{1,1,127,1,1},{63,64,64,64,63},{31,32,64,32,31},
-        {63,64,56,64,63},{99,20,8,20,99},{7,8,112,8,7},{97,81,73,69,67}};
-    static constexpr uint8_t blank[]={0,0,0,0,0},dash[]={8,8,8,8,8};
-    if(c>='0' && c<='9')return digits[c-'0'];
-    if(c>='A' && c<='Z')return letters[c-'A'];
-    if(c>='a' && c<='z')return letters[c-'a'];
-    return c=='-' ? dash : blank;
+// ---- drawing ----------------------------------------------------------------------------
+// Pixels are R8G8B8A8 in memory order (0xAABBGGRR as a little-endian uint32). Straight alpha,
+// composited by the runtime with BLEND_TEXTURE_SOURCE_ALPHA.
+struct RGBA {float r,g,b,a;};
+constexpr RGBA kRing{.10f,.09f,.08f,.78f};        // the dark, slightly warm disc
+constexpr RGBA kRingLit{.95f,.90f,.00f,.96f};      // the game's yellow
+constexpr RGBA kSeparator{.55f,.52f,.45f,.55f};
+constexpr RGBA kHub{.08f,.07f,.06f,.85f};
+constexpr RGBA kHubRim{.95f,.90f,.00f,.90f};
+constexpr RGBA kText{.96f,.96f,.94f,1.f};
+constexpr RGBA kTextLit{.08f,.07f,.05f,1.f};
+
+uint32_t Pack(const RGBA& c) {
+    auto q=[](float v){return uint32_t(std::clamp(v,0.f,1.f)*255.f+.5f);};
+    return q(c.r)|(q(c.g)<<8)|(q(c.b)<<16)|(q(c.a)<<24);
 }
-struct Canvas {
-    uint32_t* px;int w,h;
-    void Text(int x,int y,const char* s,uint32_t color,int scale) {
-        for(const char* p=s;*p;++p,x+=6*scale){const auto* g2=Glyph(*p);
-            for(int col=0;col<5;++col)for(int row=0;row<7;++row)if(g2[col]&(1u<<row))
-                for(int dy=0;dy<scale;++dy)for(int dx=0;dx<scale;++dx){const int X=x+col*scale+dx,Y=y+row*scale+dy;
-                    if(X>=0 && X<w && Y>=0 && Y<h)px[Y*w+X]=color;}}
+void Over(RGBA& dst,const RGBA& src,float cover) {
+    const float a=src.a*cover;if(a<=0)return;
+    dst.r=src.r*a+dst.r*(1-a);dst.g=src.g*a+dst.g*(1-a);dst.b=src.b*a+dst.b*(1-a);dst.a=a+dst.a*(1-a);
+}
+
+// Which sector a canvas point belongs to, and how far into it. Sector 0 is centred on top,
+// the rest run clockwise.
+struct Sector {int index;float local;};
+Sector SectorAt(float dx,float dy,int n) {
+    const float sector=2.f*kPi/float(n);
+    float from=kPi*.5f-std::atan2(dy,dx);while(from<0)from+=2*kPi;while(from>=2*kPi)from-=2*kPi;
+    const float t=from+sector*.5f;const int i=int(t/sector)%n;
+    return {i,t-float(i)*sector};
+}
+
+// Text through GDI: a real anti-aliased font, drawn white on black into a DIB, then used as a
+// coverage mask. The game process already has user32/gdi32 loaded for the launcher window.
+struct TextMask {
+    std::vector<uint8_t> cover;int w{},h{};
+    bool Render(const wchar_t* text,int px,bool bold) {
+        HDC screen=GetDC(nullptr);if(!screen)return false;
+        HDC dc=CreateCompatibleDC(screen);ReleaseDC(nullptr,screen);if(!dc)return false;
+        HFONT font=CreateFontW(-px,0,0,0,bold?FW_SEMIBOLD:FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_TT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH|FF_DONTCARE,L"Segoe UI");
+        if(!font){DeleteDC(dc);return false;}
+        auto* old=SelectObject(dc,font);
+        SIZE size{};GetTextExtentPoint32W(dc,text,int(wcslen(text)),&size);
+        w=size.cx+4;h=size.cy+2;
+        BITMAPINFO bmi{};bmi.bmiHeader.biSize=sizeof(bmi.bmiHeader);bmi.bmiHeader.biWidth=w;bmi.bmiHeader.biHeight=-h;bmi.bmiHeader.biPlanes=1;bmi.bmiHeader.biBitCount=32;bmi.bmiHeader.biCompression=BI_RGB;
+        void* bits{};HBITMAP bmp=CreateDIBSection(dc,&bmi,DIB_RGB_COLORS,&bits,nullptr,0);
+        if(!bmp || !bits){SelectObject(dc,old);DeleteObject(font);DeleteDC(dc);return false;}
+        auto* oldBmp=SelectObject(dc,bmp);
+        std::memset(bits,0,size_t(w)*h*4);
+        SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(255,255,255));
+        TextOutW(dc,2,1,text,int(wcslen(text)));
+        GdiFlush();
+        cover.resize(size_t(w)*h);
+        const auto* px32=static_cast<const uint32_t*>(bits);
+        for(size_t i=0;i<cover.size();++i)cover[i]=uint8_t((px32[i]>>8)&0xFF); // green channel = coverage
+        SelectObject(dc,oldBmp);SelectObject(dc,old);DeleteObject(bmp);DeleteObject(font);DeleteDC(dc);
+        return true;
     }
 };
 
-// Colours are ABGR in memory order for an R8G8B8A8 swapchain.
-constexpr uint32_t kSector=0xB8302A24u,kSectorLit=0xF000D8F2u,kEdge=0xFF8C8C8Cu,kText=0xFFF2F2F2u,kTextLit=0xFF101010u,kHub=0xC0181412u;
-
-void Draw(Canvas c,const std::vector<std::string>& labels,int selection) {
-    std::fill(c.px,c.px+size_t(c.w)*c.h,0u);
+void Draw(std::vector<RGBA>& img,int W,int H,const std::vector<std::string>& labels,int selection) {
+    std::fill(img.begin(),img.end(),RGBA{0,0,0,0});
     const int n=int(labels.size());if(n<1)return;
-    const float cx=c.w*.5f,cy=c.h*.5f,half=std::min(cx,cy);
-    const float rIn=half*.34f,rOut=half*.98f,hub=half*.14f;
-    const float sector=2.f*kPi/float(n),gap=.035f;
-    for(int y=0;y<c.h;++y)for(int x=0;x<c.w;++x) {
-        const float dx=float(x)+.5f-cx,dy=cy-(float(y)+.5f);const float d=std::sqrt(dx*dx+dy*dy);
-        if(d<hub){c.px[y*c.w+x]=kHub;continue;}
-        if(d<rIn || d>rOut)continue;
-        // Sector 0 is centred on top, the rest run clockwise.
-        float a=std::atan2(dy,dx);float from=kPi*.5f-a;while(from<0)from+=2*kPi;while(from>=2*kPi)from-=2*kPi;
-        const float t=from+sector*.5f;const int i=int(t/sector)%n;const float local=t-float(i)*sector;
-        if(local<gap || local>sector-gap)continue;
-        const bool edge=d<rIn+2.f || d>rOut-2.f;
-        c.px[y*c.w+x]=edge?kEdge:(i==selection?kSectorLit:kSector);
+    const float cx=W*.5f,cy=H*.5f,half=std::min(cx,cy);
+    const float rIn=half*.36f,rOut=half*.96f,hub=half*.13f;
+    const float sector=2.f*kPi/float(n),gap=.028f;            // radians of gap at each separator
+    constexpr int SS=3;                                        // supersampling per axis
+    for(int y=0;y<H;++y)for(int x=0;x<W;++x) {
+        float ring=0,lit=0,sep=0,hubC=0,rim=0;
+        for(int sy=0;sy<SS;++sy)for(int sx=0;sx<SS;++sx) {
+            const float px=float(x)+(sx+.5f)/SS,py=float(y)+(sy+.5f)/SS;
+            const float dx=px-cx,dy=cy-py;const float d=std::sqrt(dx*dx+dy*dy);
+            if(d<hub){hubC+=1;if(d>hub-2.5f)rim+=1;continue;}
+            const auto s=SectorAt(dx,dy,n);
+            const bool selected=s.index==selection;
+            const float out=selected?rOut:rOut-half*.03f;      // the lit sector stands a little proud
+            if(d<rIn || d>out)continue;
+            if(s.local<gap || s.local>sector-gap){sep+=1;continue;}
+            if(selected)lit+=1;else ring+=1;
+        }
+        const float k=1.f/(SS*SS);RGBA& o=img[size_t(y)*W+x];
+        Over(o,kRing,ring*k);Over(o,kRingLit,lit*k);Over(o,kSeparator,sep*k*.6f);Over(o,kHub,hubC*k);Over(o,kHubRim,rim*k);
     }
+    // Labels, centred on the ring's mid radius.
     for(int i=0;i<n;++i) {
         const float a=kPi*.5f-float(i)*sector;const float rad=(rIn+rOut)*.5f;
-        std::string s=labels[size_t(i)];for(auto& ch:s)ch=char(toupper(unsigned char(ch)));if(s.size()>10)s.resize(10);
-        const int scale=s.size()>7?1:2;const int wpx=int(s.size())*6*scale-scale;
-        c.Text(int(cx+std::cos(a)*rad)-wpx/2,int(cy-std::sin(a)*rad)-7*scale/2,s.c_str(),i==selection?kTextLit:kText,scale);
+        std::wstring text;for(unsigned char ch:labels[size_t(i)])text+=wchar_t(ch);
+        if(text.size()>14){text.resize(13);text+=L"…";}
+        TextMask mask;const int px=text.size()>9?int(half*.105f):int(half*.125f);
+        if(!mask.Render(text.c_str(),px,true))continue;
+        const int ox=int(cx+std::cos(a)*rad)-mask.w/2,oy=int(cy-std::sin(a)*rad)-mask.h/2;
+        const RGBA& color=i==selection?kTextLit:kText;
+        for(int y=0;y<mask.h;++y)for(int x=0;x<mask.w;++x) {
+            const int X=ox+x,Y=oy+y;if(X<0 || Y<0 || X>=W || Y>=H)continue;
+            const float c=mask.cover[size_t(y)*mask.w+x]/255.f;if(c<=0)continue;
+            Over(img[size_t(Y)*W+X],color,c);
+        }
     }
 }
 } // namespace
+
+bool DrawnMode(){return CyberpunkVR_HandWheelMode==0;}
+bool NativeAnchor(XrPosef& out){std::lock_guard lock(g.mutex);if(DrawnMode() || !g.anchored)return false;out=g.pose;return true;}
+bool NativeStick(float& x,float& y){std::lock_guard lock(g.mutex);if(DrawnMode() || !g.anchored || !g.nativeVisible)return false;x=g.stickX;y=g.stickY;return true;}
+void SetNativeVisible(bool v){std::lock_guard lock(g.mutex);g.nativeVisible=v;}
 
 void SetLabels(const char* s) {
     std::lock_guard lock(g.mutex);
     std::vector<std::string> out;std::string cur;
     for(const char* p=s?s:"";;++p){if(*p=='|' || !*p){if(!cur.empty() || *p=='|')out.push_back(cur);cur.clear();if(!*p)break;}else cur+=*p;}
-    if(out.empty())out={"1","2","3","HOLSTER"};if(out.size()>8)out.resize(8);
+    if(out.empty())out={"1","2","3","Holster"};if(out.size()>8)out.resize(8);
     if(out!=g.labels){g.labels=out;++g.generation;}
 }
 int PollCommand(){std::lock_guard lock(g.mutex);if(g.commands.empty())return 0;const int c=g.commands.front();g.commands.pop_front();return c;}
@@ -129,16 +185,18 @@ bool PulseY(){std::lock_guard lock(g.mutex);return GetTickCount64()<g.pulseUntil
 void UpdateTracking(const cvr::vrui::Tracking& t) {
     std::lock_guard lock(g.mutex);
     g.tracking=t;
-    if(!g.open)return;
+    if(!g.open && !g.anchored)return;
     const auto& hand=t.hands[1];if(!hand.valid)return;
     const V3 d=Sub(hand.aim.position,g.anchor);
     const float dx=Dot(d,g.r),dy=Dot(d,g.u);const float dist=std::sqrt(dx*dx+dy*dy);
-    int sel=-1;
-    if(dist>=CyberpunkVR_HandWheelDeadZone) {
-        const int n=int(g.labels.size());const float sector=2.f*kPi/float(n);
-        float from=kPi*.5f-std::atan2(dy,dx);while(from<0)from+=2*kPi;
-        sel=int((from+sector*.5f)/sector)%n;
+    if(g.anchored) {
+        // Native mode: full deflection toward the hand once past the dead zone, so the game's
+        // own wheel highlights the sector the hand went to; centred = nothing selected.
+        if(dist>=CyberpunkVR_HandWheelDeadZone){g.stickX=dx/dist;g.stickY=dy/dist;}else{g.stickX=0;g.stickY=0;}
+        return;
     }
+    int sel=-1;
+    if(dist>=CyberpunkVR_HandWheelDeadZone)sel=SectorAt(dx,dy,int(g.labels.size())).index;
     if(sel!=g.selection){g.selection=sel;++g.generation;}
 }
 
@@ -148,6 +206,17 @@ bool UpdateInput(const VRControllerState& vr,unsigned long long now) {
     const bool y=(vr.buttons&0x8000)!=0,b=(vr.buttons&0x2000)!=0;
     if(y && !g.yWas)g.yDownMs=now;
     const unsigned long long hold=CyberpunkVR_HandWheelHoldMs>0?unsigned long long(CyberpunkVR_HandWheelHoldMs):180ull;
+    if(!DrawnMode()) {
+        // Native mode: Y goes to the game untouched. We only place the quad once the hold is
+        // long enough that the game's wheel is coming, and synthesize the stick from there.
+        if(y && !g.anchored && now-g.yDownMs>=hold && g.tracking.valid && g.tracking.hands[1].valid) {
+            g.anchored=true;g.anchor=g.tracking.hands[1].aim.position;g.stickX=g.stickY=0;Rebase();
+            cvr::log("[handwheel] native anchor");
+        }
+        if(!y && g.anchored){g.anchored=false;g.nativeVisible=false;g.stickX=g.stickY=0;}
+        g.yWas=y;g.bWas=b;g.open=false;
+        return false;
+    }
     if(y && !g.open && now-g.yDownMs>=hold && g.tracking.valid && g.tracking.hands[1].valid) {
         g.open=true;g.anchor=g.tracking.hands[1].aim.position;g.selection=-1;Rebase();++g.generation;Push(1);
         cvr::log("[handwheel] open");
@@ -193,7 +262,9 @@ const XrCompositionLayerBaseHeader* Wheel::Prepare(XrSession session,XrSpace loc
             if(xrWaitSwapchainImage(swapchain,&wait)==XR_SUCCESS) {
                 void* data{};D3D12_RANGE none{};
                 if(SUCCEEDED(upload->Map(0,&none,&data))) {
-                    Draw({pixels.data(),int(width),int(height)},labels,selection);
+                    static std::vector<RGBA> img;img.resize(size_t(width)*height);
+                    Draw(img,int(width),int(height),labels,selection);
+                    for(size_t i=0;i<img.size();++i)pixels[i]=Pack(img[i]);
                     for(uint32_t row=0;row<height;++row)std::memcpy(static_cast<uint8_t*>(data)+size_t(row)*rowPitch,pixels.data()+size_t(row)*width,size_t(width)*4);
                     upload->Unmap(0,nullptr);
                     if(SUCCEEDED(allocator->Reset()) && SUCCEEDED(list->Reset(allocator.Get(),nullptr))) {

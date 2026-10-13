@@ -91,6 +91,17 @@ uintptr_t Visible(ink::Widget* widget, bool visible) {
 
 uintptr_t CopyEntries(uintptr_t resource, DynArray<ink::HudWidgetSpawnEntry>* entries) {
     const auto result=originalCopyEntries(resource,entries);
+    // Once per spawn list: every HUD entry by name, so a new channel (the weapon wheel on the
+    // hand, next) can be routed by name without guessing it.
+    {
+        static size_t loggedCount=0;
+        if(entries && entries->size()!=loggedCount){
+            loggedCount=entries->size();
+            std::string names;
+            for(auto& e:*entries){if(!names.empty())names+=", ";names+=e.hudEntryName.ToString();names+=e.useSeparateWindow?"*":"";}
+            Log("[hud-panel] %u HUD entries (* = separate window): %s\n",unsigned(entries->size()),names.c_str());
+        }
+    }
     // These HUD entries are authored without separate windows. Move them
     // through the engine's own separate-window creation path BEFORE spawn.
     // Never convert projected widgets (crosshair, mappins, scanner borders, etc.).
