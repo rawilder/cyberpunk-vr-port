@@ -254,13 +254,22 @@ void VRHudPanelUpdate(RED4ext::IScriptable*, RED4ext::CStackFrame* frame, int32_
     {
         std::shared_lock lock(hud->spawningLock);
         for(const auto& e:hud->entries){
-            if(!e.useSeparateWindow || !e.slotWidget || !e.slotTexture || !e.window)continue;
+            const bool wheelEntry=e.hudEntryName.hash==cvr::hud::EntryHash(cvr::hud::WheelEntry);
+            // Wheel channel diagnostic, once a second: why this entry does or does not become a sprite.
+            static ULONGLONG wheelLogMs=0;const ULONGLONG nowMs=GetTickCount64();
+            const bool wheelLog=wheelEntry && nowMs-wheelLogMs>1000;
+            if(!e.useSeparateWindow || !e.slotWidget || !e.slotTexture || !e.window){
+                if(wheelLog){wheelLogMs=nowMs;Log("[hud-panel] wheel: skipped separate=%d slot=%d texture=%d window=%d\n",int(e.useSeparateWindow),int(e.slotWidget!=nullptr),int(e.slotTexture.GetPtr()!=nullptr),int(e.window!=nullptr));}
+                continue;
+            }
             const auto channel=cvr::hud::EntryChannel(e.hudEntryName.hash,sniperNest);
             if(channel==Channel::Interaction && !g_liveControls.xrInteractionPanel)continue;
             const auto group=cvr::hud::Index(channel);auto& snapshot=*snapshots[group];
             Handle<ink::Widget> slot(e.slotWidget);
             cvr::hud::Sprite sprite;bool dirty=false;
-            if(!Geometry(slot,root.GetPtr(),sprite,dirty))continue;
+            const bool geometry=Geometry(slot,root.GetPtr(),sprite,dirty);
+            if(wheelLog){wheelLogMs=nowMs;Log("[hud-panel] wheel: channel=%u geometry=%d visible=%d opacity=%.2f rect=(%.0f,%.0f %.0fx%.0f)\n",unsigned(channel),int(geometry),int(slot->visible),slot->opacity,sprite.x,sprite.y,sprite.width,sprite.height);}
+            if(!geometry)continue;
             sprite.texture=Texture(e.slotTexture.GetPtr());
             if(!sprite.texture || snapshot.sprites.size()>=cvr::hud::MaxSprites){complete[group]=false;continue;}
             sprite.name=e.hudEntryName.hash;

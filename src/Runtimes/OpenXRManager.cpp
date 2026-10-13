@@ -2236,20 +2236,31 @@ void OpenXRManager::Shutdown() {
     // the swapchains afterwards -- i.e. it handed the runtime handles whose parent was already gone.
     // (dabinn, TofuExpress fbe336fa)
     m_framegen.Reset();
+    Log("OpenXRManager: shutdown 1 (framegen reset)\n");
     m_framegenOverlay.Shutdown(true);
     m_settingsPanel.Shutdown();
+    m_handWheel.Shutdown(true);
+    Log("OpenXRManager: shutdown 2 (overlays)\n");
     cvr::framegen::StopHardwareTelemetry();
     m_hudQuad.Shutdown();
     m_interactionQuad.Shutdown();
     m_basiliskQuad.Shutdown();
     m_surveillanceQuad.Shutdown();
     m_wheelQuad.Shutdown();
+    Log("OpenXRManager: shutdown 3 (hud quads)\n");
     cvr::hud::Shutdown();
     cvr::hud::Shutdown(cvr::hud::Channel::Interaction);
     cvr::hud::Shutdown(cvr::hud::Channel::Basilisk);
     cvr::hud::Shutdown(cvr::hud::Channel::Surveillance);
     cvr::hud::Shutdown(cvr::hud::Channel::Wheel);
+    Log("OpenXRManager: shutdown 4 (hud channels)\n");
     EndSession();
+    Log("OpenXRManager: shutdown 5 (session ended)\n");
+    if (m_eyeGazeSpace != XR_NULL_HANDLE) {
+        xrDestroySpace(m_eyeGazeSpace);
+        m_eyeGazeSpace = XR_NULL_HANDLE;
+    }
+    m_eyeGazeAction = XR_NULL_HANDLE;
 
     for (auto& eye : m_eyeSwapchains) {
         if (eye.handle != XR_NULL_HANDLE) {
@@ -2282,14 +2293,17 @@ void OpenXRManager::Shutdown() {
         m_localSpace = XR_NULL_HANDLE;
     }
 
+    Log("OpenXRManager: shutdown 6 (swapchains, spaces)\n");
     if (m_session != XR_NULL_HANDLE) {
         xrDestroySession(m_session);
         m_session = XR_NULL_HANDLE;
     }
+    Log("OpenXRManager: shutdown 7 (session destroyed)\n");
     if (m_actionSet != XR_NULL_HANDLE) {
         xrDestroyActionSet(m_actionSet);
         m_actionSet = XR_NULL_HANDLE;
     }
+    Log("OpenXRManager: shutdown 8 (action set destroyed)\n");
     // Actions belong to the action set and are destroyed with it; the handles are cleared so a
     // second Shutdown, or a re-init, cannot hand the runtime a dangling one.
     m_handPoseAction = XR_NULL_HANDLE;

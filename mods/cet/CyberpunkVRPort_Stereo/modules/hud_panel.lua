@@ -78,6 +78,7 @@ local function updatePhoneBounds(layer)
                 or class == "scannerDetailsGameController" or class == "hudCameraController"
                 or class == "hudSniperNestController"
                 or class == "gameuiScannerGameController"
+                or class == "RadialWheelController"
                 or class == "CustomAnimationsHudGameController" then
                 local root = controller:GetRootWidget()
                 local window = root and root:GetParentWidget()
