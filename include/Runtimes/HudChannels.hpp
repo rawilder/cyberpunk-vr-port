@@ -9,7 +9,7 @@ constexpr size_t Index(Channel c){return static_cast<size_t>(c);}
 constexpr uint64_t EntryHash(std::string_view name){uint64_t h=14695981039346656037ull;for(unsigned char c:name){h^=c;h*=1099511628211ull;}return h;}
 // The game's radial weapon wheel, re-hosted on the right hand (Overlay/HandWheel.cpp). The entry
 // name is taken from the [hud-panel] entry list the plugin logs at spawn.
-inline constexpr std::string_view WheelEntry="radial_wheel";
+inline constexpr std::string_view WheelEntry="radial_menu";
 constexpr Channel EntryChannel(uint64_t name,bool sniperNest=false){
     if(name==EntryHash(WheelEntry))return Channel::Wheel;
     if(name==EntryHash("interactions_root"))return Channel::Interaction;
