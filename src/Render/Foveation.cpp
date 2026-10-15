@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <mutex>
+#include <vector>
 
 extern "C" int CyberpunkVR_IsVrcamViewActive();
 extern "C" int CyberpunkVR_MainIsRightEye;
@@ -50,8 +51,29 @@ struct Eye {
     UINT width{},height{};
     std::array<Image,8> ring; // gaze updates rewrite often; a deep ring keeps in-flight frames' images intact
     size_t current{};
+    uint64_t lastUse{};
 };
-std::array<Eye,2> g_eyes;     // indexed by the ENGINE view: 0 = MAIN, 1 = VRCAM
+// Per ENGINE view (0 = MAIN, 1 = VRCAM), one ring per shading-rate image size the engine binds.
+// The engine uses more than one size (full-view passes and smaller ones), so keying by size
+// avoids rebuilding the pattern every time the size alternates. Every image handed out is also
+// registered with the command list (KeepCommandResources), so dropping a ring here can never
+// free a texture a submitted frame still reads: that was a GPU page fault on save load.
+constexpr size_t kMaxSizesPerView=4;
+std::array<std::vector<Eye>,2> g_eyes;
+uint64_t g_useCounter{};
+
+Eye& EyeFor(size_t view,UINT w,UINT h) {
+    auto& eyes=g_eyes[view];
+    for(auto& e:eyes)if(e.width==w && e.height==h){e.lastUse=++g_useCounter;return e;}
+    if(eyes.size()>=kMaxSizesPerView) {
+        auto victim=eyes.begin();
+        for(auto it=eyes.begin();it!=eyes.end();++it)if(it->lastUse<victim->lastUse)victim=it;
+        eyes.erase(victim);
+    }
+    eyes.emplace_back();
+    Eye& e=eyes.back();e.width=w;e.height=h;e.lastUse=++g_useCounter;
+    return e;
+}
 
 void QueryCaps() {
     if(g_caps.queried)return;g_caps.queried=true;
@@ -186,14 +208,18 @@ ID3D12Resource* Substitute(ID3D12GraphicsCommandList* list,ID3D12Resource* nativ
     if(!AcceptableNative(desc)){static bool once{};if(!once){once=true;cvr::log("[foveation] ignoring unexpected shading-rate image: dim=%d fmt=%d %llux%u",int(desc.Dimension),int(desc.Format),desc.Width,desc.Height);}return native;}
     const bool vrcam=CyberpunkVR_IsVrcamViewActive()!=0;
     const int xrEye=vrcam?(CyberpunkVR_MainIsRightEye?0:1):(CyberpunkVR_MainIsRightEye?1:0);
-    Eye& eye=g_eyes[vrcam?1:0];
     const UINT w=UINT(desc.Width),h=desc.Height;
-    if(eye.width!=w || eye.height!=h){for(auto& i:eye.ring)i=Image{};eye.width=w;eye.height=h;eye.current=0;}
+    Eye& eye=EyeFor(vrcam?1:0,w,h);
     float u,v;Centre(xrEye,u,v);
     // Quantise to half a tile: the eye jitters, the image should not be rebuilt for it.
     const float cx=std::round(u*float(w)*2.f)*0.5f,cy=std::round(v*float(h)*2.f)*0.5f;
     Image* current=&eye.ring[eye.current];
-    if(current->texture && current->generation==g_generation && current->cx==cx && current->cy==cy)return current->texture.Get();
+    if(current->texture && current->generation==g_generation && current->cx==cx && current->cy==cy) {
+        // Cache hit: still pin the image to this list, so its lifetime is tied to the submission
+        // rather than to this ring slot staying put.
+        if(!cvr::gpu::KeepCommandResources(list,{current->texture.Get()}))return native;
+        return current->texture.Get();
+    }
     // Settings or centre changed, or first use: write the pattern into the NEXT ring slot, so a
     // frame still reading the previous image is never overwritten underneath it.
     const size_t next=current->texture?(eye.current+1)%eye.ring.size():eye.current;
