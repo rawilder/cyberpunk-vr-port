@@ -1082,6 +1082,7 @@ DWORD OpenXRManager::FrameThreadMain() {
         // ping-pong the synth scratch slot + stride logs). The blendFactor itself
         // is computed from QPC capture timestamps, not this counter.
         ++displayFrameIndex;
+        cvr::framegen::MaybeLogStatistics();
         if (frameState.predictedDisplayPeriod > 0) {
             cvr::framegen::DisplayPeriod(frameState.predictedDisplayPeriod);
             m_predictedDisplayPeriodNs.store(frameState.predictedDisplayPeriod, std::memory_order_relaxed);

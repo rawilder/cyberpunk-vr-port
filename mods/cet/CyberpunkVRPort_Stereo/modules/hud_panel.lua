@@ -82,6 +82,16 @@ local function updatePhoneBounds(layer)
                 or class == "CustomAnimationsHudGameController" then
                 local root = controller:GetRootWidget()
                 local window = root and root:GetParentWidget()
+                -- Wheel channel diagnostic, once a second: why the radial root does or does not get bounds.
+                if class == "RadialWheelController" and M.wheelDiagSecond ~= second then
+                    M.wheelDiagSecond = second
+                    local rs = root and root:GetSize()
+                    local virtual = window and window:IsA(CName.new("inkVirtualWindow"))
+                    print(string.format("[HudPanel] wheel root=%s window=%s virtual=%s size=%sx%s visible=%s opacity=%s info=%s",
+                        root and NameToString(root:GetName()) or "nil", window and NameToString(window:GetClassName()) or "nil",
+                        tostring(virtual), tostring(rs and rs.X), tostring(rs and rs.Y), tostring(root and root:IsVisible()),
+                        tostring(root and root:GetOpacity()), tostring(root and root:GetUserData(boundsType) ~= nil)))
+                end
                 -- Sniper HUD is a child of the shared briefing entry's root.
                 -- Capture that existing window, including the native controller.
                 if class == "hudSniperNestController" and window and NameToString(window:GetName())=="Root" then

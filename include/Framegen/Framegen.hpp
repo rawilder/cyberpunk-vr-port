@@ -11,6 +11,7 @@ struct Settings {
     Backend backend=Backend::Nvidia;
     int quality=2,flowScale=50,overlayCorner=1;
     int overlayLayout=0,overlayFollow=1,historySeconds=30;
+    int logSeconds=0; // xr_framegen_log: >0 writes a [framegen] stats line to the log every N seconds (metrics on without the overlay)
     float overlayCone=60,overlayScale=1,overlayDistance=1.25f,overlayX=0,overlayY=0;
 };
 struct Statistics {
@@ -31,6 +32,7 @@ struct Statistics {
 Settings GetSettings();
 bool Enabled();
 bool MetricsEnabled();
+void MaybeLogStatistics(); // call once per frame from the frame loop; cheap when xr_framegen_log=0
 void SetSettings(Settings value);
 Statistics GetStatistics();
 struct RuntimeStatus {bool active{};char text[160]{};};

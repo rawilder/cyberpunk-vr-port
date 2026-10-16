@@ -1,5 +1,6 @@
 #include "Framegen/Framegen.hpp"
 #include "Utils/DebugGate.hpp"
+#include "Utils/StereoLog.hpp"
 #include <windows.h>
 #include <algorithm>
 #include <array>
@@ -67,6 +68,7 @@ double NowMs() {
 Settings GetSettings() {std::lock_guard lock(mutex);return settings;}
 bool Enabled() {return enabled.load(std::memory_order_relaxed);}
 bool MetricsEnabled() {return metrics.load(std::memory_order_relaxed);}
+namespace {bool MetricsOn() {return settings.overlay || settings.logSeconds>0;}}
 void SetSettings(Settings value) {
     std::lock_guard settingsLock(settingsWriteMutex);
     value.backend=value.backend==Backend::Nvidia ? Backend::Nvidia : Backend::FidelityFX;
@@ -81,13 +83,13 @@ void SetSettings(Settings value) {
     value.overlayX=bounded(value.overlayX,-60,60,0);value.overlayY=bounded(value.overlayY,-45,45,0);
     bool metricsChanged=false;
     {std::lock_guard lock(mutex);
-    metricsChanged=value.overlay!=settings.overlay;
+    metricsChanged=(value.overlay || value.logSeconds>0)!=(settings.overlay || settings.logSeconds>0);
     const bool disabledReportChanged=metricsChanged || value.enabled!=settings.enabled || value.backend!=settings.backend || !CyberpunkVR_FramegenReport[0];
     if(metricsChanged)ClearMetricsLocked();
     if(value.historySeconds!=settings.historySeconds)nextRefresh=nextSummary=0;
     settings=value;
     enabled.store(value.enabled,std::memory_order_relaxed);
-    metrics.store(value.overlay,std::memory_order_relaxed);
+    metrics.store(value.overlay || value.logSeconds>0,std::memory_order_relaxed);
     autoPace.store(value.autoPace,std::memory_order_relaxed);
     if(!value.enabled) {pacingReady.store(false,std::memory_order_relaxed);stats.generationMs=0;}
     if(cvr::RuntimeDiagnosticsEnabled() && !value.overlay && disabledReportChanged) {
@@ -105,7 +107,7 @@ RuntimeStatus GetRuntimeStatus() {
 }
 Statistics GetStatistics() {
     std::lock_guard lock(mutex);
-    if(!settings.overlay)return stats;
+    if(!MetricsOn())return stats;
     const auto now=NowMs();
     if(now<nextRefresh)return cached;
     nextRefresh=now+250;auto result=stats;
@@ -139,6 +141,13 @@ Statistics GetStatistics() {
     }
     cached=result;return result;
 }
+void MaybeLogStatistics() {
+    static double nextLog=0;int seconds=0;{std::lock_guard lock(mutex);seconds=settings.logSeconds;}
+    if(seconds<=0)return;const double now=NowMs();if(now<nextLog)return;nextLog=now+double(seconds)*1000.0;
+    const auto s=GetStatistics();
+    Log("[framegen] stats: real %.1f fg %.1f out %.1f fps | %ds avg %.1f min %.1f 1%%low %.1f 0.1%%low %.1f | cpu %.1f ms (avg %.1f p99 %.1f) gpu %.1f ms (avg %.1f p99 %.1f) budget %.1f | gen %.1f ms repeat %.1f%% skipped %llu\n",
+        s.realFps,s.generatedFps,s.outputFps,s.historySamples?seconds:0,s.averageFps,s.minimumFps,s.low1Fps,s.low01Fps,s.cpuMs,s.cpuAverageMs,s.cpuP99Ms,s.gpuMs,s.gpuAverageMs,s.gpuP99Ms,s.budgetMs,s.generationMs,s.repeatPercent,static_cast<unsigned long long>(s.skipped));
+}
 void ResetStatistics() {
     std::lock_guard lock(mutex);ClearMetricsLocked();
 }
@@ -146,28 +155,28 @@ void Status(const char* text,bool active) {
     std::lock_guard lock(mutex);stats.active=active;std::snprintf(stats.status,sizeof(stats.status),"%s",text);
 }
 void OnRealFrame(uint64_t serial,double now) {
-    if(!MetricsEnabled())return;std::lock_guard lock(mutex);if(!settings.overlay || !serial || serial==lastReal)return;
+    if(!MetricsEnabled())return;std::lock_guard lock(mutex);if(!MetricsOn() || !serial || serial==lastReal)return;
     if(!started)started=now;
     if(lastRealTime>0 && now>lastRealTime) {stats.cpuMs=now-lastRealTime;cpu.Add(now,stats.cpuMs);cpuHistory.Add(now,stats.cpuMs);}
     lastReal=serial;lastRealTime=now;real.Add(now);++stats.realFrames;
 }
 void OnSubmitted(uint64_t,bool synth,bool repeat,double now) {
-    if(!MetricsEnabled())return;std::lock_guard lock(mutex);if(!settings.overlay)return;
+    if(!MetricsEnabled())return;std::lock_guard lock(mutex);if(!MetricsOn())return;
     if(repeat) {repeats.Add(now);++stats.repeatedFrames;return;}
     output.Add(now);if(synth) {generated.Add(now);++stats.generatedFrames;}else ++stats.realSubmissions;
 }
 void OnGpuFrame(double ms) {
     if(!MetricsEnabled() || !std::isfinite(ms) || ms<0 || ms>10000)return;
-    std::lock_guard lock(mutex);if(!settings.overlay)return;stats.gpuValid=true;stats.gpuMs=ms;const auto now=NowMs();gpu.Add(now,ms);gpuHistory.Add(now,ms);
+    std::lock_guard lock(mutex);if(!MetricsOn())return;stats.gpuValid=true;stats.gpuMs=ms;const auto now=NowMs();gpu.Add(now,ms);gpuHistory.Add(now,ms);
 }
-void OnGeneration(double ms) {if(!MetricsEnabled())return;std::lock_guard lock(mutex);if(settings.overlay)stats.generationMs=ms;}
+void OnGeneration(double ms) {if(!MetricsEnabled())return;std::lock_guard lock(mutex);if(MetricsOn())stats.generationMs=ms;}
 void OnInput(unsigned eye,uint32_t w,uint32_t h) {
-    if(eye>1 || !MetricsEnabled())return;std::lock_guard lock(mutex);if(!settings.overlay)return;++stats.inputFrames[eye];
+    if(eye>1 || !MetricsEnabled())return;std::lock_guard lock(mutex);if(!MetricsOn())return;++stats.inputFrames[eye];
     stats.renderWidth[eye]=w;stats.renderHeight[eye]=h;
     stats.inputsReady=stats.inputFrames[0] && stats.inputFrames[1];
 }
-void OnSkip() {if(!MetricsEnabled())return;std::lock_guard lock(mutex);if(settings.overlay)++stats.skipped;}
-void SetVram(uint64_t bytes) {if(!MetricsEnabled())return;std::lock_guard lock(mutex);if(settings.overlay)stats.vramBytes=bytes;}
+void OnSkip() {if(!MetricsEnabled())return;std::lock_guard lock(mutex);if(MetricsOn())++stats.skipped;}
+void SetVram(uint64_t bytes) {if(!MetricsEnabled())return;std::lock_guard lock(mutex);if(MetricsOn())stats.vramBytes=bytes;}
 void DisplayPeriod(int64_t ns) {if(ns>=4000000 && ns<=40000000)displayPeriod.store(ns,std::memory_order_relaxed);}
 void PacingReady(bool ready) {pacingReady.store(ready,std::memory_order_relaxed);}
 void PaceRenderedFrame() {
@@ -203,6 +212,7 @@ bool ParseSetting(const char* line,Settings& value) {
     else if(sscanf_s(line,"xr_framegen_overlay_layout = %d",&n)==1)value.overlayLayout=n;
     else if(sscanf_s(line,"xr_framegen_overlay_follow = %d",&n)==1)value.overlayFollow=n;
     else if(sscanf_s(line,"xr_framegen_history = %d",&n)==1)value.historySeconds=n;
+    else if(sscanf_s(line,"xr_framegen_log = %d",&n)==1)value.logSeconds=n;
     else if(sscanf_s(line,"xr_framegen_overlay_cone = %f",&f)==1)value.overlayCone=f;
     else if(sscanf_s(line,"xr_framegen_overlay_scale = %f",&f)==1)value.overlayScale=f;
     else if(sscanf_s(line,"xr_framegen_overlay_distance = %f",&f)==1)value.overlayDistance=f;
@@ -215,6 +225,6 @@ void WriteSettings(void* file,const Settings& s) {
     std::fprintf(static_cast<FILE*>(file),"xr_framegen=%d\nxr_framegen_overlay=%d\nxr_framegen_pace=%d\nxr_framegen_backend=%d\nxr_framegen_quality=%d\nxr_framegen_flow_scale=%d\nxr_framegen_overlay_corner=%d\n",
         s.enabled,s.overlay,s.autoPace,int(s.backend),s.quality,s.flowScale,s.overlayCorner);
     std::fprintf(static_cast<FILE*>(file),"xr_framegen_overlay_layout=%d\nxr_framegen_overlay_follow=%d\nxr_framegen_history=%d\nxr_framegen_overlay_cone=%.2f\nxr_framegen_overlay_scale=%.3f\nxr_framegen_overlay_distance=%.3f\nxr_framegen_overlay_x=%.2f\nxr_framegen_overlay_y=%.2f\n",
-        s.overlayLayout,s.overlayFollow,s.historySeconds,s.overlayCone,s.overlayScale,s.overlayDistance,s.overlayX,s.overlayY);
+        s.overlayLayout,s.overlayFollow,s.historySeconds,s.overlayCone,s.overlayScale,s.overlayDistance,s.overlayX,s.overlayY,s.logSeconds);
 }
 }
