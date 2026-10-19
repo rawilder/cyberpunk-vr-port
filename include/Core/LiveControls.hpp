@@ -107,6 +107,7 @@ struct LiveControls {
     volatile float xrFoveationOuter = 0.65f;  // coarsest rate beyond this radius; 2x2 between
     volatile int xrFoveationRate = 4;         // 2 or 4: the coarsest rate (NxN)
     volatile int xrFoveationGaze = 1;         // follow the eye-tracked gaze when the runtime provides one
+    volatile int xrCpuAffinity = 1;           // Core/CpuAffinity.hpp: 0 off, 1 P-cores + above-normal, 2 P-cores + high
     volatile float xrBodyFreeLookDeg = 10.0f;
     volatile float xrBodyMoveRadius = .10f; // metres; roomscale movement starts outside this radius
     volatile float xrBodyFreeLookDownDeg = 30.0f;

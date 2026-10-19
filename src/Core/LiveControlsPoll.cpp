@@ -17,6 +17,7 @@
 #include "Hooks/Reflex.hpp"
 #include "Hooks/ReflexOptions.hpp"
 #include "Render/Foveation.hpp"
+#include "Core/CpuAffinity.hpp"
 #include <windows.h>
 #include <psapi.h>
 #include <xinput.h>
@@ -537,6 +538,7 @@ void PollLiveControls() {
     float xrFoveationOuter = g_liveControls.xrFoveationOuter;
     int xrFoveationRate = g_liveControls.xrFoveationRate;
     int xrFoveationGaze = g_liveControls.xrFoveationGaze;
+    int xrCpuAffinity = g_liveControls.xrCpuAffinity;
     int xrBreaststrokeSwim = g_liveControls.xrBreaststrokeSwim;
     int xrLadderGripClimb = g_liveControls.xrLadderGripClimb;
     int xrLadderAutoFinish = g_liveControls.xrLadderAutoFinish;
@@ -1284,6 +1286,8 @@ void PollLiveControls() {
             sscanf_s(line, "xr_foveation_rate = %d", &intValue) == 1) xrFoveationRate = intValue;
         if (sscanf_s(line, "xr_foveation_gaze=%d", &intValue) == 1 ||
             sscanf_s(line, "xr_foveation_gaze = %d", &intValue) == 1) xrFoveationGaze = intValue;
+        if (sscanf_s(line, "xr_cpu_affinity=%d", &intValue) == 1 ||
+            sscanf_s(line, "xr_cpu_affinity = %d", &intValue) == 1) xrCpuAffinity = intValue;
         if (sscanf_s(line, "xr_tracked_body_rotation = %d", &intValue) == 1) xrTrackedBodyRotation=intValue;
         if (sscanf_s(line, "xr_hybrid_body_rotation = %d", &intValue) == 1) xrHybridBodyRotation=intValue;
         if (sscanf_s(line, "xr_physical_body_rotation=%d", &intValue) == 1 ||
@@ -1489,6 +1493,8 @@ void PollLiveControls() {
     cvr::foveation::SetSettings({g_liveControls.xrFoveation, g_liveControls.xrFoveationInner,
                                  g_liveControls.xrFoveationOuter, g_liveControls.xrFoveationRate,
                                  g_liveControls.xrFoveationGaze});
+    g_liveControls.xrCpuAffinity = xrCpuAffinity;
+    cvr::cpu::Apply(xrCpuAffinity);
     g_liveControls.xrBreaststrokeSwim = xrBreaststrokeSwim != 0 ? 1 : 0;
     g_liveControls.xrLadderGripClimb = xrLadderGripClimb != 0 ? 1 : 0;
     g_liveControls.xrLadderAutoFinish = xrLadderAutoFinish != 0 ? 1 : 0;

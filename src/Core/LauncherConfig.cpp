@@ -162,6 +162,7 @@ void EnsureLiveControlFileExists() {
     fprintf(file, "xr_foveation_outer=0.650\n");
     fprintf(file, "xr_foveation_rate=4\n");
     fprintf(file, "xr_foveation_gaze=1\n");
+    fprintf(file, "xr_cpu_affinity=1\n");
     fprintf(file, "xr_tracked_body_rotation=0\n");
     fprintf(file, "xr_hybrid_body_rotation=1\n");
     fprintf(file, "xr_body_free_look_deg=10.0\n");
