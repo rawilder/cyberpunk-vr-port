@@ -99,6 +99,7 @@ struct LiveControlsUiState {
     float xrFoveationOuter = 0.65f;
     int xrFoveationRate = 4;
     int xrFoveationGaze = 1;
+    int xrCpuAffinity = 1;
     // Cutscene VRIK suspend (PR #40). The minimum GameplayTier at which the plugin fully suspends
     // the body+arm solve on foot: -1/0 = never, 1..4 = Tier2..Tier5.
     // Default 3 (Tier4_FPPCinematic). F10 -> VRIK tab.

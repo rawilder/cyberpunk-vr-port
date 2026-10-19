@@ -2,8 +2,10 @@
 #include "Utils/DebugGate.hpp"
 #include "Utils/StereoLog.hpp"
 #include <windows.h>
+#include <tlhelp32.h>
 #include <algorithm>
 #include <array>
+#include <unordered_map>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -141,12 +143,40 @@ Statistics GetStatistics() {
     }
     cached=result;return result;
 }
+// The busiest thread of this process over the last interval, as a percentage of one logical
+// CPU. The engine's main/render thread is the usual ceiling with two views; this says whether
+// it is saturated regardless of what the frame-interval numbers above suggest.
+namespace {
+struct ThreadSample {ULONGLONG kernel=0,user=0;};
+double BusiestThreadPercent(double intervalMs,DWORD& busiestId) {
+    static std::unordered_map<DWORD,ThreadSample> previous;
+    std::unordered_map<DWORD,ThreadSample> current;double best=0;busiestId=0;
+    const DWORD pid=GetCurrentProcessId();
+    HANDLE snap=CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD,0);if(snap==INVALID_HANDLE_VALUE)return 0;
+    THREADENTRY32 te{};te.dwSize=sizeof(te);
+    if(Thread32First(snap,&te))do{
+        if(te.th32OwnerProcessID!=pid)continue;
+        HANDLE t=OpenThread(THREAD_QUERY_LIMITED_INFORMATION,FALSE,te.th32ThreadID);if(!t)continue;
+        FILETIME c,e,k,u;if(GetThreadTimes(t,&c,&e,&k,&u)){
+            ThreadSample s{(ULONGLONG(k.dwHighDateTime)<<32)|k.dwLowDateTime,(ULONGLONG(u.dwHighDateTime)<<32)|u.dwLowDateTime};
+            current[te.th32ThreadID]=s;
+            auto it=previous.find(te.th32ThreadID);
+            if(it!=previous.end() && intervalMs>0){const double used100ns=double((s.kernel+s.user)-(it->second.kernel+it->second.user));const double pct=used100ns/(intervalMs*10000.0)*100.0;if(pct>best){best=pct;busiestId=te.th32ThreadID;}}
+        }
+        CloseHandle(t);
+    }while(Thread32Next(snap,&te));
+    CloseHandle(snap);previous.swap(current);return best;
+}
+}
 void MaybeLogStatistics() {
-    static double nextLog=0;int seconds=0;{std::lock_guard lock(mutex);seconds=settings.logSeconds;}
+    static double nextLog=0,lastLog=0;int seconds=0;{std::lock_guard lock(mutex);seconds=settings.logSeconds;}
     if(seconds<=0)return;const double now=NowMs();if(now<nextLog)return;nextLog=now+double(seconds)*1000.0;
     const auto s=GetStatistics();
-    Log("[framegen] stats: real %.1f fg %.1f out %.1f fps | %ds avg %.1f min %.1f 1%%low %.1f 0.1%%low %.1f | cpu %.1f ms (avg %.1f p99 %.1f) gpu %.1f ms (avg %.1f p99 %.1f) budget %.1f | gen %.1f ms repeat %.1f%% skipped %llu\n",
-        s.realFps,s.generatedFps,s.outputFps,s.historySamples?seconds:0,s.averageFps,s.minimumFps,s.low1Fps,s.low01Fps,s.cpuMs,s.cpuAverageMs,s.cpuP99Ms,s.gpuMs,s.gpuAverageMs,s.gpuP99Ms,s.budgetMs,s.generationMs,s.repeatPercent,static_cast<unsigned long long>(s.skipped));
+    DWORD busiest=0;const double busiestPct=BusiestThreadPercent(lastLog>0?now-lastLog:0,busiest);lastLog=now;
+    bool enabled=false;{std::lock_guard lock(mutex);enabled=settings.enabled;}
+    Log("[framegen] stats: real %.1f fg %.1f out %.1f fps | %ds avg %.1f min %.1f 1%%low %.1f 0.1%%low %.1f | cpu %.1f ms (avg %.1f p99 %.1f) gpu %.1f ms (avg %.1f p99 %.1f) budget %.1f | gen %.1f ms repeat %.1f%% skipped %llu | fg %s/%s \"%s\" | gpu %.0f%% cpu %.0f%% busiest thread %.0f%% (tid %lu)\n",
+        s.realFps,s.generatedFps,s.outputFps,s.historySamples?seconds:0,s.averageFps,s.minimumFps,s.low1Fps,s.low01Fps,s.cpuMs,s.cpuAverageMs,s.cpuP99Ms,s.gpuMs,s.gpuAverageMs,s.gpuP99Ms,s.budgetMs,s.generationMs,s.repeatPercent,static_cast<unsigned long long>(s.skipped),
+        enabled?"on":"off",s.active?"active":"idle",s.status,s.hardware.gpuUsage,s.hardware.cpuUsage,busiestPct,static_cast<unsigned long>(busiest));
 }
 void ResetStatistics() {
     std::lock_guard lock(mutex);ClearMetricsLocked();

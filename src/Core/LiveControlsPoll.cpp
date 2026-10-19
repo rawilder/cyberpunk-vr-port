@@ -1771,6 +1771,7 @@ LiveControlsUiState MakeLiveControlsUiState() {
     state.xrFoveationOuter = g_liveControls.xrFoveationOuter;
     state.xrFoveationRate = g_liveControls.xrFoveationRate;
     state.xrFoveationGaze = g_liveControls.xrFoveationGaze;
+    state.xrCpuAffinity = g_liveControls.xrCpuAffinity;
     state.xrBreaststrokeSwim = g_liveControls.xrBreaststrokeSwim;
     state.xrLadderGripClimb = g_liveControls.xrLadderGripClimb;
     state.xrLadderAutoFinish=g_liveControls.xrLadderAutoFinish;
@@ -2052,6 +2053,7 @@ void PersistLiveControlsUiState(const LiveControlsUiState& state) {
     fprintf(file, "xr_foveation_outer=%.3f\n", state.xrFoveationOuter);
     fprintf(file, "xr_foveation_rate=%d\n", state.xrFoveationRate >= 4 ? 4 : 2);
     fprintf(file, "xr_foveation_gaze=%d\n", state.xrFoveationGaze != 0 ? 1 : 0);
+    fprintf(file, "xr_cpu_affinity=%d\n", state.xrCpuAffinity);
     fprintf(file, "xr_breaststroke_swim=%d\n", state.xrBreaststrokeSwim != 0 ? 1 : 0);
     fprintf(file, "xr_ladder_grip_climb=%d\n", state.xrLadderGripClimb != 0 ? 1 : 0);
     fprintf(file, "xr_ladder_auto_finish=%d\nxr_ladder_finish_distance=%.3f\n",state.xrLadderAutoFinish!=0 ? 1:0,state.xrLadderFinishDistance);
@@ -2170,6 +2172,8 @@ extern "C" void SetLiveControlsUiState(const LiveControlsUiState* state, int per
     cvr::foveation::SetSettings({g_liveControls.xrFoveation, g_liveControls.xrFoveationInner,
                                  g_liveControls.xrFoveationOuter, g_liveControls.xrFoveationRate,
                                  g_liveControls.xrFoveationGaze});
+    g_liveControls.xrCpuAffinity = state->xrCpuAffinity;
+    cvr::cpu::Apply(state->xrCpuAffinity);
     g_liveControls.xrBreaststrokeSwim = state->xrBreaststrokeSwim != 0 ? 1 : 0;
     g_liveControls.xrLadderGripClimb = state->xrLadderGripClimb != 0 ? 1 : 0;
     g_liveControls.xrLadderAutoFinish=state->xrLadderAutoFinish!=0 ? 1:0;
